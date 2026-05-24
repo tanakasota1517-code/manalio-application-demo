@@ -1,0 +1,554 @@
+{
+  "status": "measured",
+  "updatedAt": "2026-05-13",
+  "title": "保育士試験（筆記）前期 過去問ベンチマーク",
+  "range": {
+    "from": "令和3年度",
+    "to": "令和7年度",
+    "session": "前期",
+    "years": [
+      "令和7年度",
+      "令和6年度",
+      "令和5年度",
+      "令和4年度",
+      "令和3年度"
+    ]
+  },
+  "passThreshold": 0.6,
+  "claimStatus": "claimable_with_disclaimer",
+  "safeClaimAfterMeasured": "保育士試験（筆記）前期過去問ベンチマークにおいて、合格基準相当の得点を確認しています。",
+  "disclaimer": "この検証は保育士試験（筆記）の過去問ベンチマークであり、資格取得、実技試験の結果、学生の受験結果を約束するものではありません。",
+  "sources": [
+    {
+      "label": "全国保育士養成協議会 過去の試験問題",
+      "url": "https://www.hoyokyo.or.jp/exam/pasttest/past-test.html"
+    },
+    {
+      "label": "全国保育士養成協議会 筆記試験概要",
+      "url": "https://www.hoyokyo.or.jp/exam/guidance/writtenexam1.html"
+    },
+    {
+      "label": "保育士試験過去問題（暫定取り込み元）",
+      "url": "https://hoikusi.biz/contents/test_con/tebiki.html"
+    }
+  ],
+  "subjects": [
+    {
+      "name": "保育原理",
+      "questionCount": 20,
+      "passingCorrect": 12
+    },
+    {
+      "name": "教育原理",
+      "questionCount": 10,
+      "passingCorrect": 6
+    },
+    {
+      "name": "社会的養護",
+      "questionCount": 10,
+      "passingCorrect": 6
+    },
+    {
+      "name": "子ども家庭福祉",
+      "questionCount": 20,
+      "passingCorrect": 12
+    },
+    {
+      "name": "社会福祉",
+      "questionCount": 20,
+      "passingCorrect": 12
+    },
+    {
+      "name": "保育の心理学",
+      "questionCount": 20,
+      "passingCorrect": 12
+    },
+    {
+      "name": "子どもの保健",
+      "questionCount": 20,
+      "passingCorrect": 12
+    },
+    {
+      "name": "子どもの食と栄養",
+      "questionCount": 20,
+      "passingCorrect": 12
+    },
+    {
+      "name": "保育実習理論",
+      "questionCount": 20,
+      "passingCorrect": 12
+    }
+  ],
+  "years": [
+    {
+      "year": "令和7年度",
+      "session": "前期",
+      "overall": {
+        "scoreRate": 0.925,
+        "score": 740,
+        "maxScore": 800,
+        "pass": true
+      },
+      "subjects": [
+        {
+          "name": "保育原理",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "教育原理",
+          "scoreRate": 1,
+          "score": 50,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 10,
+          "total": 10
+        },
+        {
+          "name": "社会的養護",
+          "scoreRate": 1,
+          "score": 50,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 10,
+          "total": 10
+        },
+        {
+          "name": "子ども家庭福祉",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "社会福祉",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "保育の心理学",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "子どもの保健",
+          "scoreRate": 0.95,
+          "score": 95,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 19,
+          "total": 20
+        },
+        {
+          "name": "子どもの食と栄養",
+          "scoreRate": 0.8,
+          "score": 80,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 16,
+          "total": 20
+        },
+        {
+          "name": "保育実習理論",
+          "scoreRate": 0.65,
+          "score": 65,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 13,
+          "total": 20
+        }
+      ],
+      "measuredAt": "2026-05-11T14:06:41.585Z"
+    },
+    {
+      "year": "令和6年度",
+      "session": "前期",
+      "overall": {
+        "scoreRate": 0.919,
+        "score": 735,
+        "maxScore": 800,
+        "pass": true
+      },
+      "subjects": [
+        {
+          "name": "保育原理",
+          "scoreRate": 0.85,
+          "score": 85,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 17,
+          "total": 20
+        },
+        {
+          "name": "教育原理",
+          "scoreRate": 0.8,
+          "score": 40,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 8,
+          "total": 10
+        },
+        {
+          "name": "社会的養護",
+          "scoreRate": 1,
+          "score": 50,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 10,
+          "total": 10
+        },
+        {
+          "name": "子ども家庭福祉",
+          "scoreRate": 0.95,
+          "score": 95,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 19,
+          "total": 20
+        },
+        {
+          "name": "社会福祉",
+          "scoreRate": 0.95,
+          "score": 95,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 19,
+          "total": 20
+        },
+        {
+          "name": "保育の心理学",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "子どもの保健",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "子どもの食と栄養",
+          "scoreRate": 0.9,
+          "score": 90,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 18,
+          "total": 20
+        },
+        {
+          "name": "保育実習理論",
+          "scoreRate": 0.8,
+          "score": 80,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 16,
+          "total": 20
+        }
+      ],
+      "measuredAt": "2026-05-13T02:01:52.356Z"
+    },
+    {
+      "year": "令和5年度",
+      "session": "前期",
+      "overall": {
+        "scoreRate": 0.888,
+        "score": 710,
+        "maxScore": 800,
+        "pass": true
+      },
+      "subjects": [
+        {
+          "name": "保育原理",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "教育原理",
+          "scoreRate": 0.7,
+          "score": 35,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 7,
+          "total": 10
+        },
+        {
+          "name": "社会的養護",
+          "scoreRate": 0.9,
+          "score": 45,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 9,
+          "total": 10
+        },
+        {
+          "name": "子ども家庭福祉",
+          "scoreRate": 0.95,
+          "score": 95,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 19,
+          "total": 20
+        },
+        {
+          "name": "社会福祉",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "保育の心理学",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "子どもの保健",
+          "scoreRate": 0.9,
+          "score": 90,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 18,
+          "total": 20
+        },
+        {
+          "name": "子どもの食と栄養",
+          "scoreRate": 0.75,
+          "score": 75,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 15,
+          "total": 20
+        },
+        {
+          "name": "保育実習理論",
+          "scoreRate": 0.7,
+          "score": 70,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 14,
+          "total": 20
+        }
+      ],
+      "measuredAt": "2026-05-13T02:08:30.803Z"
+    },
+    {
+      "year": "令和4年度",
+      "session": "前期",
+      "overall": {
+        "scoreRate": 0.944,
+        "score": 755,
+        "maxScore": 800,
+        "pass": true
+      },
+      "subjects": [
+        {
+          "name": "保育原理",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "教育原理",
+          "scoreRate": 0.9,
+          "score": 45,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 9,
+          "total": 10
+        },
+        {
+          "name": "社会的養護",
+          "scoreRate": 0.9,
+          "score": 45,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 9,
+          "total": 10
+        },
+        {
+          "name": "子ども家庭福祉",
+          "scoreRate": 0.8,
+          "score": 80,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 16,
+          "total": 20
+        },
+        {
+          "name": "社会福祉",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "保育の心理学",
+          "scoreRate": 0.95,
+          "score": 95,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 19,
+          "total": 20
+        },
+        {
+          "name": "子どもの保健",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "子どもの食と栄養",
+          "scoreRate": 1,
+          "score": 100,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 20,
+          "total": 20
+        },
+        {
+          "name": "保育実習理論",
+          "scoreRate": 0.9,
+          "score": 90,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 18,
+          "total": 20
+        }
+      ],
+      "measuredAt": "2026-05-13T02:16:07.530Z"
+    },
+    {
+      "year": "令和3年度",
+      "session": "前期",
+      "overall": {
+        "scoreRate": 0.875,
+        "score": 700,
+        "maxScore": 800,
+        "pass": true
+      },
+      "subjects": [
+        {
+          "name": "保育原理",
+          "scoreRate": 0.8,
+          "score": 80,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 16,
+          "total": 20
+        },
+        {
+          "name": "教育原理",
+          "scoreRate": 0.9,
+          "score": 45,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 9,
+          "total": 10
+        },
+        {
+          "name": "社会的養護",
+          "scoreRate": 0.9,
+          "score": 45,
+          "maxScore": 50,
+          "pass": true,
+          "correct": 9,
+          "total": 10
+        },
+        {
+          "name": "子ども家庭福祉",
+          "scoreRate": 0.85,
+          "score": 85,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 17,
+          "total": 20
+        },
+        {
+          "name": "社会福祉",
+          "scoreRate": 0.9,
+          "score": 90,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 18,
+          "total": 20
+        },
+        {
+          "name": "保育の心理学",
+          "scoreRate": 0.95,
+          "score": 95,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 19,
+          "total": 20
+        },
+        {
+          "name": "子どもの保健",
+          "scoreRate": 0.9,
+          "score": 90,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 18,
+          "total": 20
+        },
+        {
+          "name": "子どもの食と栄養",
+          "scoreRate": 0.9,
+          "score": 90,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 18,
+          "total": 20
+        },
+        {
+          "name": "保育実習理論",
+          "scoreRate": 0.8,
+          "score": 80,
+          "maxScore": 100,
+          "pass": true,
+          "correct": 16,
+          "total": 20
+        }
+      ],
+      "measuredAt": "2026-05-13T02:23:44.496Z"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Manalio">
+  <defs>
+    <linearGradient id="manalioPageGradient" x1="17" y1="17" x2="78" y2="76" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2FB7A8"/>
+      <stop offset="1" stop-color="#66D1C1"/>
+    </linearGradient>
+    <linearGradient id="manalioPersonGradient" x1="40" y1="4" x2="56" y2="20" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2FB7A8"/>
+      <stop offset="1" stop-color="#1EA99B"/>
+    </linearGradient>
+  </defs>
+  <path d="M13 56C19 74 32 87 48 87C64 87 77 74 83 56C79 82 65 93 48 93C31 93 17 82 13 56Z" fill="#183B6B"/>
+  <path d="M18 22C31 23 41 32 45 44V75C36 64 27 59 18 59V22Z" fill="#2FB7A8"/>
+  <path d="M51 44C55 32 65 23 78 22V59C69 59 60 64 51 75V44Z" fill="url(#manalioPageGradient)"/>
+  <path d="M48 77C39 64 27 58 15 58C21 64 31 69 42 74C44 75 46 76 48 77Z" fill="white"/>
+  <path d="M48 77C57 64 69 58 81 58C75 64 65 69 54 74C52 75 50 76 48 77Z" fill="white"/>
+  <path d="M61 36C66 33 71 31 76 30" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <path d="M60 47C65 43 70 41 76 40" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <path d="M60 58C65 53 70 51 76 50" stroke="white" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="48" cy="13" r="8.5" fill="url(#manalioPersonGradient)"/>
+</svg>

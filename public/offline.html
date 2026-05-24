@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>オフライン | Manalio</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --navy: #183b6b;
+        --teal: #2fb7a8;
+        --line: #d9e6ec;
+        --text: #23384d;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: linear-gradient(180deg, #f5fbfa 0%, #ffffff 100%);
+        color: var(--text);
+        font-family:
+          "UD Digi Kyokasho N-R",
+          "UD Digi Kyokasho NP-R",
+          "Yu Gothic",
+          "Hiragino Sans",
+          sans-serif;
+      }
+
+      main {
+        width: min(520px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 32px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 20px 60px rgba(24, 59, 107, 0.1);
+      }
+
+      img {
+        width: 52px;
+        height: 52px;
+      }
+
+      h1 {
+        margin: 20px 0 12px;
+        color: var(--navy);
+        font-size: 24px;
+        line-height: 1.5;
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.8;
+      }
+
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 46px;
+        margin-top: 24px;
+        padding: 0 18px;
+        border-radius: 10px;
+        background: var(--teal);
+        color: #ffffff;
+        font-weight: 700;
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/images/brand-icon.svg" alt="" aria-hidden="true" />
+      <h1>通信環境を確認してください。</h1>
+      <p>
+        Manalioは、実習記録や学校管理情報を安全に扱うため、入力・生成・ログ確認には通信が必要です。
+        接続が戻ったら、もう一度ページを開いてください。
+      </p>
+      <a href="/login">ログイン画面へ戻る</a>
+    </main>
+  </body>
+</html>
