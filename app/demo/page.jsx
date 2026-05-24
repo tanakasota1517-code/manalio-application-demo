@@ -2,7 +2,7 @@ import { PublicFooter, PublicHeader } from "../site-components";
 
 export const metadata = {
   title: "体験ページ | Manalio",
-  description: "Manalioの学生入力、記録前の気づき、問い返し、翌日の観察、教員向け整理の流れを、安全な架空例だけで確認できる閲覧ページです。",
+  description: "Manalioの学生入力、記録前の気づき、問い返し、翌日の観察、先生向け整理の流れを、安全な架空例だけで確認できる閲覧ページです。",
   alternates: {
     canonical: "/demo",
   },
@@ -35,7 +35,7 @@ const flowSteps = [
   },
   {
     label: "05",
-    title: "教員が面談に使う",
+    title: "先生が面談に使う",
     body: "当日確認、授業共有、学生本人の自己確認に分け、全件添削ではなく面談材料として扱います。",
   },
 ];
@@ -78,7 +78,7 @@ const reviewerHighlights = [
     body: "実習先で受けた助言を、次の日に何を見るか、どう関わるかへつなげます。",
   },
   {
-    title: "教員は面談に使う",
+    title: "先生は面談に使う",
     body: "全件添削や成績判定ではなく、学生との面談や授業で扱う候補を整理します。",
   },
 ];
@@ -99,7 +99,7 @@ const consultationItems = [
   {
     label: "保存範囲",
     title: "何を残し、何を残さないか",
-    body: "学生の本文を広く保存するのではなく、教員確認に必要な段階と範囲を相談します。",
+    body: "学生の本文を広く保存するのではなく、先生が確認する段階と範囲を相談します。",
   },
   {
     label: "小さな試用",
@@ -120,7 +120,7 @@ export default function DemoPage() {
             <h1>学生が書き、気づき、翌日の観察へ戻る流れ。</h1>
             <p>
               Manalioは、実習日誌を代わりに完成させる画面ではありません。
-              学生が自分で書いた記録をもとに、記録前の気づき、問い返し、教員の面談準備へつなげる流れを確認できます。
+              学生が自分で書いた記録をもとに、記録前の気づき、問い返し、先生の面談準備へつなげる流れを確認できます。
             </p>
             <div className="demo-assurance-list" aria-label="この体験ページの前提">
               {demoAssurances.map((item) => (
@@ -137,7 +137,7 @@ export default function DemoPage() {
               <span>学生入力</span>
               <span>記録前の気づき</span>
               <span>問い返し</span>
-              <span>教員整理</span>
+              <span>先生整理</span>
             </div>
           </div>
         </section>
@@ -209,10 +209,10 @@ export default function DemoPage() {
 
         <section className="detail-section detail-split reverse">
           <div>
-            <span className="site-kicker">教員画面</span>
+            <span className="site-kicker">先生画面</span>
             <h2>全件添削ではなく、面談で扱う候補を分ける</h2>
             <p>
-              教員画面は学生の成績を判定する場所ではありません。
+              先生画面は学生の成績を判定する場所ではありません。
               学生がどこでつまずき、どの指導を翌日に活かそうとしているかを、必要な範囲に絞って確認する画面です。
             </p>
           </div>
