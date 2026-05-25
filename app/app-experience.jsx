@@ -54,7 +54,7 @@ const GUARDIAN_NAME_DETECTION_PATTERN = createGuardianNamePattern();
 const GUARDIAN_NAME_REDACTION_PATTERN = createGuardianNamePattern("g");
 
 const defaultSchoolFormat = {
-  diaryHeadings: ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "先生への相談"],
+  diaryHeadings: ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "教員への相談"],
   planHeadings: ["活動概要", "ねらい", "環境構成", "展開と援助", "相談ポイント"],
   checkRules: ["個人名の置換・マスキング", "断定表現の確認", "未入力項目の明示", "保育所保育指針の観点", "学校の担当教員への相談点"],
   writingStyle: "学生が先に書いた記録に対して、完成文ではなく問い返し・安全確認・相談点として返す。",
@@ -1959,7 +1959,7 @@ function StudentInputStep({
           <span>3</span>
           <div>
             <strong>実習先で受けた助言</strong>
-            <p>その日の指導を、翌日の観察と学校の先生への相談につなげます。</p>
+            <p>その日の指導を、翌日の観察と学校の教員への相談につなげます。</p>
           </div>
         </div>
         <div className="wide">
@@ -2403,12 +2403,12 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
         <section className="school-panel demo-flow-panel">
           <div>
             <span className="label">事前レビュー</span>
-            <h3>先生レビューの確認順</h3>
+            <h3>教員レビューの確認順</h3>
           </div>
           <div className="school-step-list">
             <span>1. 学生画面で安全な架空入力例を試す</span>
             <span>2. 安全な表現、問い返し、提出前チェックまで見る</span>
-            <span>3. 先生画面で当日確認・授業共有・学生本人の分類を見る</span>
+            <span>3. 教員画面で当日確認・授業共有・学生本人の分類を見る</span>
             <span>4. 学校フォーマットと保存範囲を返信フォームへ返す</span>
           </div>
         </section>
@@ -2483,7 +2483,7 @@ function MetricCard({ label, value, detail }) {
   );
 }
 
-function TeacherPreviewPanel({ title = "先生に確認していただきたいこと", items = teacherPreviewCheckpoints }) {
+function TeacherPreviewPanel({ title = "教員に確認していただきたいこと", items = teacherPreviewCheckpoints }) {
   return (
     <section className="school-panel teacher-preview-panel">
       <div>

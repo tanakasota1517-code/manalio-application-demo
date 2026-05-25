@@ -50,7 +50,7 @@ export async function GET(request) {
       return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies());
     }
 
-    const session = await buildSessionFromUser(user);
+    const session = await buildSessionFromUser(user, { accessToken: currentAccessToken });
     return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session }, cookieUpdates);
   } catch (error) {
     console.warn("Supabase session restore failed:", error.message);
@@ -132,7 +132,7 @@ async function handleSignIn(body) {
     },
   });
   const user = auth.user || (auth.access_token ? await getAuthUser(auth.access_token) : null);
-  const session = await buildSessionFromUser(user, body);
+  const session = await buildSessionFromUser(user, { ...body, accessToken: auth.access_token });
 
   return jsonWithCookies(
     {
@@ -214,7 +214,7 @@ async function buildSessionFromUser(user, fallback = {}) {
     throw new AuthError("missing_user", "ユーザー情報を取得できませんでした。", 502);
   }
 
-  let profile = await getProfile(user.id);
+  let profile = await getProfile(user.id, fallback.accessToken);
   if (!profile) {
     throw new AuthError(
       "profile_required",
@@ -225,8 +225,8 @@ async function buildSessionFromUser(user, fallback = {}) {
 
   const metadata = user.user_metadata || {};
   const role = normalizeRole(profile.role);
-  const school = profile?.school_id ? await getRowById("schools", profile.school_id) : null;
-  const classRecord = profile?.class_id ? await getRowById("classes", profile.class_id) : null;
+  const school = profile?.school_id ? await getRowById("schools", profile.school_id, fallback.accessToken) : null;
+  const classRecord = profile?.class_id ? await getRowById("classes", profile.class_id, fallback.accessToken) : null;
   const schoolName = school?.name || profile?.school_name || metadata.school_name || fallback.schoolName || "未設定の学校";
   const className = classRecord?.name || profile?.class_name || metadata.class_name || fallback.className || DEFAULT_CLASS_NAME;
   const name = profile?.display_name || metadata.display_name || fallback.name || user.email?.split("@")[0] || "利用者";
@@ -274,15 +274,15 @@ async function ensureProfile(user, metadata = {}) {
   return rows?.[0] || null;
 }
 
-async function getProfile(userId) {
+async function getProfile(userId, accessToken) {
   if (!isRestConfigured()) return null;
-  const rows = await supabaseRestFetch(`/profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`);
+  const rows = await supabaseRestFetch(`/profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`, { accessToken });
   return rows?.[0] || null;
 }
 
-async function getRowById(table, id) {
+async function getRowById(table, id, accessToken) {
   if (!isRestConfigured() || !id) return null;
-  const rows = await supabaseRestFetch(`/${table}?select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
+  const rows = await supabaseRestFetch(`/${table}?select=*&id=eq.${encodeURIComponent(id)}&limit=1`, { accessToken });
   return rows?.[0] || null;
 }
 
@@ -341,11 +341,14 @@ async function supabaseAuthFetch(path, options = {}) {
 }
 
 async function supabaseRestFetch(path, options = {}) {
+  const useUserToken = Boolean(options.accessToken);
+  const apiKey = useUserToken ? SUPABASE_ANON_KEY : SUPABASE_SERVICE_ROLE_KEY;
+  const authorization = useUserToken ? `Bearer ${options.accessToken}` : `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
   const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1${path}`, {
     method: options.method || "GET",
     headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      apikey: apiKey,
+      authorization,
       "content-type": "application/json",
       prefer: options.prefer || "return=representation",
     },
@@ -417,7 +420,7 @@ function isAuthConfigured() {
 
 function isRestConfigured() {
   if (SUPABASE_DISABLED) return false;
-  return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+  return Boolean(SUPABASE_URL && (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY));
 }
 
 function normalizeRole(role) {

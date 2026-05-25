@@ -1,7 +1,7 @@
 import { isRestConfigured, supabaseRestFetch } from "./_supabase.js";
 
 export const DEFAULT_SCHOOL_FORMAT = {
-  diaryHeadings: ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "先生への相談"],
+  diaryHeadings: ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "教員への相談"],
   planHeadings: ["活動概要", "ねらい", "環境構成", "展開と援助", "相談ポイント"],
   checkRules: ["個人名の置換・マスキング", "断定表現の確認", "未入力項目の明示", "保育所保育指針の観点", "学校の担当教員への相談点"],
   writingStyle: "学生が先に書いた記録に対して、完成文ではなく問い返し・安全確認・相談点として返す。",

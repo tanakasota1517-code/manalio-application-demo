@@ -19,7 +19,7 @@ GitHubへ出す時は、新しい公開リポジトリを作り、この候補�
 
 - `.env.local`、APIキー、Cookie、認証ヘッダーが入っている。
 - レビュー用のURL、確認用ログイン、パスワード、送付文が入っている。
-- 学校名、先生名、学生情報、子どもの実名、実習先情報が入っている。
+- 学校名、教員名、学生情報、子どもの実名、実習先情報が入っている。
 - `docs/agent-vault/`、`docs/archive/`、`docs/meeting-notes/`、`obsidian/` が入っている。
 - `.next/`、`node_modules/`、`.expo/`、`outputs/` をzipやGitHub Webアップロードで一緒に上げようとしている。
 - READMEに、PoC前MVP、実データ入力禁止、日誌代筆ではないことが書かれていない。
@@ -45,4 +45,4 @@ If `npm run build` creates `.next/`, do not upload this folder as a zip or via G
 
 Stop if any internal notes, teacher-review URLs, login credentials, passwords, real school data, `.env.local`, or archived work logs appear.
 
-Generated path: outputs/application-github-candidate-2026-05-24T03-39-40-324Z
+Generated path: outputs/application-github-candidate-2026-05-25T17-55-28-152Z
