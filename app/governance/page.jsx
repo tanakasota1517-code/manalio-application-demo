@@ -46,7 +46,7 @@ export default function GovernancePage() {
             <article>
               <span>04</span>
               <strong>確認記録</strong>
-              <p>学生入力本文やAI本文を広く保存するのではなく、入力概要、確認候補、面談用の見出しなど、実習後の学習支援に必要な範囲だけを扱います。</p>
+              <p>学生入力本文やAI本文を広く保存するのではなく、入力概要、確認候補、教員が面談前に確認するポイントなど、実習後の学習支援に必要な範囲だけを扱います。</p>
             </article>
           </div>
         </section>
