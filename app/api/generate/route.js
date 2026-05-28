@@ -17,6 +17,7 @@ import {
   summarizeBedrockGuardrailResponse,
   validateBedrockGuardrailConfig,
 } from "../_bedrockGuardrails.js";
+import { normalizePrivacyScanText } from "../../privacyPatterns.js";
 
 const ANTHROPIC_FREE_MODEL = process.env.ANTHROPIC_FREE_MODEL || "claude-haiku-4-5-20251001";
 const ANTHROPIC_PRACTICE_MODEL = process.env.ANTHROPIC_PRACTICE_MODEL || "claude-sonnet-4-6";
@@ -185,7 +186,7 @@ async function applyOptionalBedrockGuardrail(body) {
     });
     if (mode === "enforce" && isBedrockGuardrailIntervention(summary)) {
       throw new PublicError(
-        "追加の安全確認で個人情報や要配慮情報の可能性を検出しました。該当箇所をA児、実習先園、担任の先生のように置き換えてから再送信してください。",
+        "追加の安全確認で個人情報や要配慮情報の可能性を検出しました。該当箇所をA児、実習先園、担任職員のように置き換えてから再送信してください。",
         422,
         "bedrock_guardrail_blocked",
         "AI",
@@ -427,8 +428,8 @@ function isPlanSupportEnabled() {
 function normalizeDiaryPayload(payload) {
   const source = normalizePayloadObject(payload);
   const memo = normalizeBoundedText(source.memo, 6000, "今日あったこと");
-  if (!memo) {
-    throw new PublicError("今日あったことを入力してください。", 400, "memo_required", "AI");
+  if (!hasMeaningfulText(memo)) {
+    throw new PublicError("今日あったことを、言葉で入力してください。", 400, "memo_required", "AI");
   }
 
   return {
@@ -454,7 +455,7 @@ function normalizePlanPayload(payload) {
   const source = normalizePayloadObject(payload);
   const activity = normalizeBoundedText(source.activity, 200, "活動名");
   const planMemo = normalizeBoundedText(source.planMemo, 6000, "ねらい・不安な点");
-  if (!activity && !planMemo) {
+  if (!hasMeaningfulText(activity) && !hasMeaningfulText(planMemo)) {
     throw new PublicError("活動名、またはねらい・不安な点を入力してください。", 400, "plan_payload_required", "AI");
   }
 
@@ -474,11 +475,20 @@ function normalizePayloadObject(payload) {
 }
 
 function normalizeBoundedText(value, maxLength, label) {
-  const text = String(value || "").replace(/\r\n/g, "\n").trim();
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") {
+    throw new PublicError(`${label}の形式が不正です。`, 400, "invalid_field_type", "AI");
+  }
+  const text = normalizePrivacyScanText(value).replace(/\r\n/g, "\n").trim();
   if (text.length > maxLength) {
     throw new PublicError(`${label}が長すぎます。内容を短くしてください。`, 413, "field_too_large", "AI");
   }
   return text;
+}
+
+function hasMeaningfulText(value) {
+  const signalChars = normalizePrivacyScanText(value).match(/[一-龯ぁ-んァ-ンA-Za-z0-9０-９]/g) || [];
+  return signalChars.length >= 2;
 }
 
 function shouldRequireAuth() {
@@ -904,7 +914,7 @@ function buildSystemPrompt(subscription, schoolFormat = null) {
   const premium = subscription === "practice";
   return [
     "あなたは保育士・幼稚園教諭養成課程の実習生を支援する、日本語の省察支援・提出前安全確認アシスタントです。",
-    "目的は『代筆』ではなく『学生が自分で書いた記録への問い返し』です。学生が入力した事実・考えたこと・明日の課題を土台に、確認すべき点、危険表現、追記すべき観察事実、先生に相談する問いを返してください。",
+    "目的は『代筆』ではなく『学生が自分で書いた記録への問い返し』です。学生が入力した事実・考えたこと・明日の課題を土台に、確認すべき点、危険表現、追記すべき観察事実、教員に相談する問いを返してください。",
     "学生がそのまま提出する完成文や、日誌本文として貼れる文章は返しません。各sectionは、短い確認メモ、問い返し、追記観点として書き、学生本人が自分の言葉で書き直す余地を残してください。",
     "学生が『自分で考えたこと』『明日見たいこと・相談したいこと』を入力している場合は、それを尊重し、AIが別の考察や反省文を作らず、根拠・断定・不足・相談点を確認してください。",
     "【補完禁止ルール】以下は入力にない限り絶対に書かないでください。",
@@ -922,7 +932,7 @@ function buildSystemPrompt(subscription, schoolFormat = null) {
     "抽象的な入力を扱う場合は、本文では抽象度を保ち、checksで『どのように関わったか』『どのような声かけだったか』を確認項目として残してください。",
     "上記の禁止・置換対象の言葉は、本文だけでなくchecksにもそのまま出さないでください。『入力なしに〜と書いていないか』『〜と判断していないか』のような禁止例の引用も避け、より中立的な確認表現にしてください。",
     "未入力項目の追記を促す場合も、括弧内で具体例を列挙しないでください。例:『積む・並べる』『声をかける・見守る』のような候補提示は、入力にない行動を学生が採用しやすいため避けます。",
-    "学生メモに子どもの実名や愛称が含まれていた場合は、出力では『A児』『B児』『C児』のように置換・マスキングしてください。保育者名は『担任の先生』『主任の先生』等の役割表現に置き換えます。",
+    "学生メモに子どもの実名や愛称が含まれていた場合は、出力では『A児』『B児』『C児』のように置換・マスキングしてください。保育者名は『担任職員』『主任職員』等の役割表現に置き換えます。",
     "入力にない出来事、子どもの発言、保育者の意図、成果を勝手に作らないでください。足りない情報は補完せず、提出前の自己確認で確認項目として示してください。",
     "天気、時間帯、室内外、クラスの雰囲気、子どもたちの落ち着き、保育者の様子なども、入力に明記されていない場合は書かないでください。",
     "【子どもの記述】評価・診断・問題行動視する表現は使いません。",
@@ -989,8 +999,8 @@ function buildUserPrompt(kind, payload, schoolFormat = null) {
       "1. 活動概要 — 学生が書いた活動名・内容を、指導案の冒頭にふさわしい簡潔な記述に整える。活動内容を勝手に増やさない。",
       "2. ねらい — 学生のメモから読み取れる『経験としてのねらい』を整理する。年齢に対して無理のある表現は問いとして残す。学生メモに記載のない領域や発達観点を断定的に追加しない。",
       "3. 環境構成・準備 — 学生メモから読み取れる範囲の物的・空間的・時間的環境を整理する。材料、場所、人数、配置が未入力なら、本文では触れずchecksで確認項目として残す。",
-      "4. 展開と援助 — 導入・展開・まとめの流れと、実習生が意識したい援助の視点。学生メモにない展開を創作しない。活動手順が未定なら、本文では『展開は未定であり、担当の先生と確認したい』と書き、具体案はchecksに確認項目として残す。素材名から具体的な動作や遊び方を入力なしに追加しない。簡潔な箇条書きを使ってよい。",
-      "5. 安全面・配慮・相談ポイント — 想定される安全面の留意、個別配慮の視点、担当の先生に相談すべき点。",
+      "4. 展開と援助 — 導入・展開・まとめの流れと、実習生が意識したい援助の視点。学生メモにない展開を創作しない。活動手順が未定なら、本文では『展開は未定であり、担当教員と確認したい』と書き、具体案はchecksに確認項目として残す。素材名から具体的な動作や遊び方を入力なしに追加しない。簡潔な箇条書きを使ってよい。",
+      "5. 安全面・配慮・相談ポイント — 想定される安全面の留意、個別配慮の視点、担当教員に相談すべき点。",
       "",
       "【checks】指導案として提出前に学生自身が確認すべき問いを3〜5件。未入力項目、ねらいと活動の整合、安全面、年齢適切性などの観点。",
     ].join("\n");
@@ -1040,7 +1050,7 @@ function buildUserPrompt(kind, payload, schoolFormat = null) {
     "考察の禁止: 学生メモにない発達効果や一般論（例: 手指の発達、空間認識、創造性、社会性など）で水増ししない。情報が足りない場合は、何を追記すべきかを書く。",
     "5. 教員への相談 — 学校の担当教員に確認したい点を、学生が質問しやすい形で整理する。実習先の指導内容を評価・分析する表現にしない。実習先指導員からの助言は、翌日の観察や学生の理解確認に変換し、実習先への評価・批判にしない。翌日の実習中に意識する内容は『明日の観察』に分け、実習担当教員への相談と混同しない。",
     "",
-    "【checks】学生が提出前に見直すための問いを3〜5件。断定表現の確認、個人情報、入力不足、先生への確認事項、5領域や保育所保育指針とのつながりなどの観点。",
+    "【checks】学生が提出前に見直すための問いを3〜5件。断定表現の確認、個人情報、入力不足、教員への確認事項、5領域や保育所保育指針とのつながりなどの観点。",
   ].join("\n");
 }
 
@@ -1141,7 +1151,7 @@ function normalizeChecks(value, outputGuard = null, kind = "diary") {
     cleaned.push(GUIDELINE_CHECK);
   }
   if (outputGuard?.redactedNames) {
-    cleaned.push("個人名や職員名をA児・担任の先生などへ置換できているか確認しましょう。");
+    cleaned.push("個人名や職員名をA児・担任職員などへ置換できているか確認しましょう。");
   }
   if (outputGuard?.replacedRiskTerms) {
     cleaned.push("評価語ではなく、観察された行動として書けているか確認しましょう。");
@@ -1193,7 +1203,7 @@ function buildNameReplacements(text) {
   }
   for (const match of String(text).matchAll(/([一-龯ぁ-んァ-ンA-Za-z]{1,12})(先生)/g)) {
     const raw = match[0];
-    if (!replacements.has(raw)) replacements.set(raw, "担任の先生");
+    if (!replacements.has(raw)) replacements.set(raw, "担任職員");
   }
   return replacements;
 }
@@ -1251,7 +1261,7 @@ function buildDiaryMock(payload, subscription, schoolFormat = null) {
   const hasEvaluationWords = /(うまく使えない|やる気がなさそう|嬉しそう|落ち着きがない|うまくいった|できない|協調性がない|理解が遅い)/.test(memo);
   const headings = schoolFormat?.diaryHeadings || DEFAULT_DIARY_HEADINGS;
   const childSection = hasPersonalNames
-    ? "学生メモには個人名や愛称が含まれる可能性があるため、出力ではA児・B児・担任の先生のように置き換えて扱う。A児の行動、周囲の子どもの言葉、実習生の関わりは、入力された事実の範囲で整理したい。"
+    ? "学生メモには個人名や愛称が含まれる可能性があるため、出力ではA児・B児・担任職員のように置き換えて扱う。A児の行動、周囲の子どもの言葉、実習生の関わりは、入力された事実の範囲で整理したい。"
     : hasEvaluationWords
       ? "学生メモには評価語や感情を断定しやすい表現が含まれている。子どもの姿は、観察できた行動として書き直し、どのような姿が見られたのかを実際の場面に沿って追記したい。"
       : "学生メモに書かれた事実をもとに、子どもの姿を観察表現で整理する。遊びや関わりの具体的な内容は入力された範囲に限り、不足している部分は追記したい。";
@@ -1272,7 +1282,7 @@ function buildDiaryMock(payload, subscription, schoolFormat = null) {
         : "学校の担当教員には、保育者の関わりを日誌に書く範囲、自分の考察として書いてよい範囲、明日の観察で特に見る点を確認したい。",
     ],
     checks: [
-      "子どもの実名や職員名が含まれている場合、A児・担任の先生などへ置換できていますか。",
+      "子どもの実名や職員名が含まれている場合、A児・担任職員などへ置換できていますか。",
       "子どもの姿を評価語ではなく、観察された行動として書けていますか。",
       GUIDELINE_CHECK,
       hasFeedback ? "実習先で受けた助言を、翌日に見る具体的な観察事実へ置き換えられていますか。" : "",
@@ -1295,15 +1305,15 @@ function buildPlanMock(payload, subscription, schoolFormat = null) {
       `ねらいは、学生メモにある不安や意図をもとに整理する。不安な点は「${concern}」であり、年齢や活動内容に合っているか確認したい。`,
       "材料、場所、人数、配置、時間配分が未入力の場合は、本文で補わず、実際の環境を確認してから追記する必要がある。",
       premium
-        ? "展開が未定の場合は、具体的な活動手順を創作せず、導入、展開、まとめで何を確認すべきかを整理する。援助は、安全面、参加しづらい子への関わり、活動の終え方を先生に相談したい。"
-        : "展開が未定の場合は、具体的な活動手順を創作せず、担当の先生と確認したい点として残す。",
+        ? "展開が未定の場合は、具体的な活動手順を創作せず、導入、展開、まとめで何を確認すべきかを整理する。援助は、安全面、参加しづらい子への関わり、活動の終え方を教員に相談したい。"
+        : "展開が未定の場合は、具体的な活動手順を創作せず、担当教員と確認したい点として残す。",
       premium
-        ? "安全面では、活動場所、素材の扱い、子ども同士の距離、片付けの流れを確認したい。個別配慮が必要な子どもについては、事前に担当の先生へ相談する。"
+        ? "安全面では、活動場所、素材の扱い、子ども同士の距離、片付けの流れを確認したい。個別配慮が必要な子どもについては、事前に担当教員へ相談する。"
         : "安全面では、活動場所、素材の扱い、子ども同士の距離、片付けの流れを確認したい。",
     ],
     checks: premium
       ? ["ねらいが子どもの経験として書けていますか。", "保育所保育指針の5領域との関連は入力内容から確認できますか。", "活動の流れは入力した内容から外れていませんか。", "安全面と個別配慮を担当教員に確認できますか。"]
-      : ["活動の具体的な流れは入力されていますか。", "保育所保育指針の観点は確認材料として扱えていますか。", "材料、場所、人数、配置は確認できていますか。", "安全面について担当の先生に相談する点は整理できていますか。"],
+      : ["活動の具体的な流れは入力されていますか。", "保育所保育指針の観点は確認材料として扱えていますか。", "材料、場所、人数、配置は確認できていますか。", "安全面について担当教員に相談する点は整理できていますか。"],
     source: "mock",
   };
 }

@@ -42,6 +42,15 @@ function clearAppLocalStorage() {
   }
 }
 
+function safeSetLocalStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [authConfigured, setAuthConfigured] = useState(null);
@@ -91,7 +100,7 @@ export default function LoginPage() {
 
   function saveDemoSession(session) {
     clearAppLocalStorage();
-    localStorage.setItem("manabi-demo-session", JSON.stringify(session));
+    return safeSetLocalStorage("manabi-demo-session", JSON.stringify(session));
   }
 
   function loginAs(selectedRole = role) {
@@ -104,7 +113,10 @@ export default function LoginPage() {
       className,
       signedInAt: new Date().toISOString(),
     };
-    saveDemoSession(session);
+    if (!saveDemoSession(session)) {
+      setStatus("ブラウザの保存設定により、サービス画面を開けませんでした。学校アカウントでのログインを試してください。");
+      return;
+    }
     router.push("/app");
   }
 

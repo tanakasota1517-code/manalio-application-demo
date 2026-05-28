@@ -17,6 +17,7 @@ const LIMITS = {
   practiceDailyUses: 10,
   adBonusLimit: 3,
 };
+const ENABLE_LOG_EXPORTS = process.env.NEXT_PUBLIC_MANABI_ENABLE_LOG_EXPORTS === "true";
 
 const initialDiary = {
   date: "",
@@ -111,7 +112,7 @@ const diarySamples = [
       goal: "",
       memo: "自由遊びの時間に、A児がブロックで線路を作っていた。B児が近づいて同じブロックを使おうとすると、A児は「まだ使っている」と言ってブロックを手で押さえた。B児は少し離れて様子を見ていた。しばらくして、A児が余っているブロックをB児の近くに置くと、B児も線路の続きを作り始めた。",
       reflection: "最初は取り合いになると思ったが、A児は自分の遊びを守りながら、少しずつB児が入れる余地を作っていたように見えた。すぐに大人が間に入るより、子ども同士のやり取りを少し待つことも大切だと感じた。",
-      tomorrowTask: "A児が他の子どもと遊びを共有するとき、どのようなタイミングで受け入れているかを見たい。大人が声をかける場合、どの場面まで待つとよいか先生に相談したい。",
+      tomorrowTask: "A児が他の子どもと遊びを共有するとき、どのようなタイミングで受け入れているかを見たい。大人が声をかける場合、どの場面まで待つとよいか教員に相談したい。",
     },
     feedback: {
       guidanceCategory: "見守り",
@@ -135,7 +136,7 @@ const diarySamples = [
       goal: "道具を使って作る楽しさを味わう",
       memo: "製作活動で、A児が紙を丸く切ろうとしていた。はさみの向きを変えるところで手が止まり、何度か紙を持ち替えていた。近くの子どもが先に切り終えると、A児は少し焦った様子で紙を強く握った。声をかけると、A児は「丸くならない」と言っていた。",
       reflection: "できていない部分だけを見ると声をかけたくなるが、A児は自分で紙の向きを変えながら試していた。完成の形だけでなく、どこを工夫しようとしているかを見る必要があると思った。",
-      tomorrowTask: "製作中に手が止まったとき、子どもが自分で試している時間なのか、助けを求めている時間なのかを見分けたい。声をかける前に見るポイントを先生に相談したい。",
+      tomorrowTask: "製作中に手が止まったとき、子どもが自分で試している時間なのか、助けを求めている時間なのかを見分けたい。声をかける前に見るポイントを教員に相談したい。",
     },
     feedback: {
       guidanceCategory: "観察",
@@ -158,12 +159,12 @@ const diarySamples = [
       scene: "食事",
       goal: "食事場面での子どもの姿と保育者の援助を観察する",
       memo: "子ども名1くんがスプーンを持ったまましばらく皿を見ていた。子ども名2ちゃんが隣から「これおいしいよ」と言った。私が「一口食べてみる？」と声をかけると、子ども名1くんは少し口に入れた。担任教員名1は近くで様子を見ていた。",
-      reflection: "子ども名や先生名をそのまま書いてしまっているため、A児・B児・実習先の担任の先生に置き換えてから記録したい。",
+      reflection: "子ども名や職員名をそのまま書いてしまっているため、A児・B児・実習先の担任職員に置き換えてから記録したい。",
       tomorrowTask: "明日は、個人名を書かずに、食事場面での子どもの手の動き、言葉、保育者の見守りを記録する。",
     },
     feedback: {
       guidanceCategory: "安全配慮",
-      received: "実習先の先生から、個人名や先生名は記録に残さず、A児・B児・担任の先生のように置き換えるよう助言を受けた。",
+      received: "実習先指導員から、個人名や職員名は記録に残さず、A児・B児・担任職員のように置き換えるよう助言を受けた。",
       interpretation: "具体的な場面は書いてよいが、誰のことか分かる情報は残さない必要があると理解した。",
       unclear: "どこまで具体的に書くと個人が分かる情報になるのか、判断に迷う。",
       tomorrowAction: "食事場面では、名前ではなくA児・B児で記録し、場所や家庭事情につながる内容は書かない。",
@@ -183,7 +184,7 @@ const diarySamples = [
       goal: "戸外遊びでの友だち同士の関わりを観察する",
       memo: "戸外遊びで、砂場の道具を使っていたA児のそばにB児が来て、同じ道具を使いたいと言った。A児は道具を持ったまま黙っていた。B児は別の道具を探しに行ったが、何度かA児の方を見ていた。その後、A児が作っていた山が完成すると、A児は道具をB児の近くに置いた。",
       reflection: "A児は言葉では返していなかったが、遊びが終わった後に道具を渡す行動があった。B児もすぐに諦めたのではなく、様子を見ながら待っていた。順番を守る場面でも、子どもごとの待ち方や伝え方が違うと感じた。",
-      tomorrowTask: "子どもが言葉で伝えない場面でも、表情や道具の置き方にどのような意味があるかを見たい。順番待ちの場面で、大人がどこまで言葉を補うとよいか先生に相談したい。",
+      tomorrowTask: "子どもが言葉で伝えない場面でも、表情や道具の置き方にどのような意味があるかを見たい。順番待ちの場面で、大人がどこまで言葉を補うとよいか教員に相談したい。",
     },
     feedback: {
       guidanceCategory: "声かけ",
@@ -391,6 +392,12 @@ const teacherPreviewCheckpoints = [
   },
 ];
 
+const teacherPreviewReturnItems = [
+  "PoC前に最低限直す点",
+  "教員画面に出ると役立つ情報・出ない方がよい情報",
+  "学校フォーマットに合わせるために必要な見出し",
+];
+
 const formatReviewQuestions = [
   {
     kicker: "日誌様式",
@@ -450,7 +457,12 @@ function getLocalDateKey(date = new Date()) {
 }
 
 function normalizeMultiline(value) {
-  return value.trim().replace(/\n{3,}/g, "\n\n");
+  return normalizePrivacyScanText(value).replace(/\r\n/g, "\n").trim().replace(/\n{3,}/g, "\n\n");
+}
+
+function hasMeaningfulText(value) {
+  const signalChars = normalizePrivacyScanText(value).match(/[一-龯ぁ-んァ-ンA-Za-z0-9０-９]/g) || [];
+  return signalChars.length >= 2;
 }
 
 function buildDiaryGenerationPayload(diary, feedback, tone) {
@@ -478,9 +490,18 @@ function getSourceLabel(source) {
 function getSavedFeedbackRecords(key) {
   try {
     const records = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(records) ? records : [];
+    return safeRecordList(records);
   } catch {
     return [];
+  }
+}
+
+function safeSetLocalStorage(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -534,6 +555,31 @@ function safeExportSession(session) {
   };
 }
 
+function safeList(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function safeRecordList(value) {
+  return safeList(value).filter((item) => item && typeof item === "object" && !Array.isArray(item));
+}
+
+function normalizeStoredDemoSession(session) {
+  if (!session || typeof session !== "object" || Array.isArray(session)) return null;
+  if (session.source !== "demo") return null;
+  const role = session.role === "teacher" ? "teacher" : session.role === "student" ? "student" : null;
+  if (!role) return null;
+  return {
+    source: "demo",
+    role,
+    roleLabel: role === "teacher" ? "教員" : "学生",
+    name: safeCopyText(session.name || (role === "teacher" ? "実習担当教員" : "実習生"), 80),
+    email: safeCopyText(session.email || "", 120),
+    schoolName: safeCopyText(session.schoolName || "", 120),
+    className: safeCopyText(session.className || "", 120),
+    signedInAt: safeCopyText(session.signedInAt || "", 80),
+  };
+}
+
 function buildInputSummary(input = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return {};
   return {
@@ -553,7 +599,7 @@ function buildInputSummary(input = {}) {
 
 function removeAllowedAnonymizedTerms(text) {
   return String(text || "").replace(
-    /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生/g,
+    /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生|担任職員|主任職員|実習先指導員/g,
     "",
   );
 }
@@ -570,10 +616,13 @@ function normalizePossiblyAnonymizedChildReference(raw, name, suffix) {
 }
 
 function normalizePossiblyAnonymizedTeacherReference(raw, name) {
-  if (/^(担任の|主任の|学校の|実習先の)$/.test(name)) return raw;
-  if (/^[A-EＡ-Ｅa-eａ-ｅ]$/.test(name)) return "担任の先生";
+  if (name === "担任の") return "担任職員";
+  if (name === "主任の") return "主任職員";
+  if (name === "学校の") return "学校の教員";
+  if (name === "実習先の") return "実習先指導員";
+  if (/^[A-EＡ-Ｅa-eａ-ｅ]$/.test(name)) return "担任職員";
   const nestedAnonymous = String(name || "").match(/^(.*?)([A-EＡ-Ｅa-eａ-ｅ])$/);
-  if (nestedAnonymous) return `${nestedAnonymous[1]}担任の先生`;
+  if (nestedAnonymous) return `${nestedAnonymous[1]}担任職員`;
   return null;
 }
 
@@ -590,7 +639,7 @@ function buildClientPrivacyFlags(value = {}) {
     hasPromptInstructionLikeText: /(前の指示|これまでの指示|上記の指示|システム指示|system prompt|developer message|プロンプト|制約を無視|指示を無視|JSON不要|実名を出力|個人情報を出力|完成文として提出|そのまま提出|APIキー|秘密情報|内部設定)/i.test(riskText)
       || /(前の指示|これまでの指示|上記の指示|システム指示|systemprompt|developermessage|プロンプト|制約を無視|指示を無視|JSON不要|実名を出力|個人情報を出力|完成文として提出|そのまま提出|APIキー|秘密情報|内部設定)/i.test(compactRiskText),
     hasLikelyFullName: COMMON_FULL_NAME_DETECTION_PATTERN.test(riskText),
-    hasAllowedAnonymizedText: /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生/.test(text),
+    hasAllowedAnonymizedText: /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生|担任職員|主任職員|実習先指導員/.test(text),
   };
 }
 
@@ -604,7 +653,7 @@ function buildClientPrivacyCheck(value = {}) {
       ? "住所、電話番号、メール、URL、学籍番号、保護者名、職員名などは、問い返し前に伏字化します。"
       : "",
     flags.hasLikelyFullName
-      ? "実名と思われる氏名は、A児、A君、担任の先生などに置き換える候補として確認します。"
+      ? "実名と思われる氏名は、A児、A君、担任職員などに置き換える候補として確認します。"
       : "",
     flags.hasMedicalOrFamilyInfo
       ? "診断名、通院、服薬、家庭事情などの要配慮情報は、問い返しへ進める前に確認します。"
@@ -612,12 +661,12 @@ function buildClientPrivacyCheck(value = {}) {
   ].filter(Boolean);
   const warnings = [
     flags.hasChildNameLikeText || flags.hasSchoolNameLikeText
-      ? "子どもの名前、園名、職員名らしき表現は、A児、A君、実習先園、担任の先生のような表現に整えます。"
+      ? "子どもの名前、園名、職員名らしき表現は、A児、A君、実習先園、担任職員のような表現に整えます。"
       : "",
   ].filter(Boolean);
   const notes = [
     flags.hasAllowedAnonymizedText
-      ? "A児・A君・実習先の担任の先生・実習先園などの置換済み表現は、そのまま使えます。"
+      ? "A児・A君・実習先の担任職員・実習先園などの置換済み表現は、そのまま使えます。"
       : "",
   ].filter(Boolean);
   return { flags, blockers, warnings, notes };
@@ -634,6 +683,30 @@ function safeCopyText(value, maxLength = 280) {
   return redactSensitiveText(text).slice(0, maxLength);
 }
 
+function normalizeDisplayList(value, fallback = [], count = null, maxLength = 420) {
+  const list = safeList(value);
+  const size = count ?? Math.max(list.length, fallback.length);
+  return Array.from({ length: size }, (_, index) => {
+    const primary = safeCopyText(list[index] ?? "", maxLength);
+    return primary || safeCopyText(fallback[index] ?? "", maxLength);
+  }).filter(Boolean);
+}
+
+function normalizeResultSections(result = {}) {
+  const fallbackSections = Array(5).fill("入力内容を確認し、実際の記録に合わせて追記してください。");
+  const headings = normalizeDisplayList(result?.headings, defaultSchoolFormat.diaryHeadings, 5, 80);
+  const sections = normalizeDisplayList(result?.sections, fallbackSections, 5, 520);
+  return sections.map((body, index) => ({
+    heading: headings[index] || defaultSchoolFormat.diaryHeadings[index] || "確認",
+    body,
+  }));
+}
+
+function normalizeResultChecks(result = {}) {
+  const fallback = ["入力にない事実を補っていないか確認しましょう。", "個人名や特定につながる情報が残っていないか確認しましょう。", "担当の教員に確認したい点を整理できていますか。"];
+  return normalizeDisplayList(result?.checks, fallback, null, 220).slice(0, 5);
+}
+
 function redactSensitiveText(text) {
   let next = normalizePrivacyScanText(text)
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "〈メールアドレス〉")
@@ -648,7 +721,7 @@ function redactSensitiveText(text) {
     .replace(/(園名|実習先名|施設名)[:：]?\s*[^\s、。]{1,40}/g, "〈園名〉")
     .replace(MEDICAL_INFO_REDACTION_PATTERN, "〈診断名等〉")
     .replace(FAMILY_INFO_REDACTION_PATTERN, "〈配慮情報〉")
-    .replace(/(担任教員名|担任名|職員名|保育者名|先生名)[:：]?\s*[^\s、。]{0,30}/g, "担任の先生");
+    .replace(/(担任教員名|担任名|職員名|保育者名|先生名)[:：]?\s*[^\s、。]{0,30}/g, "担任職員");
   next = next.replace(COMMON_FULL_NAME_REDACTION_PATTERN, "〈氏名〉");
   let childIndex = 0;
   const childLabels = ["A児", "B児", "C児", "D児", "E児"];
@@ -672,7 +745,7 @@ function redactSensitiveText(text) {
   return next.replace(/([一-龯ぁ-んァ-ンA-Za-z0-9０-９]{1,18})(先生)/g, (raw, name) => {
     const normalizedAnonymous = normalizePossiblyAnonymizedTeacherReference(raw, name);
     if (normalizedAnonymous) return normalizedAnonymous;
-    return "担任の先生";
+    return "担任職員";
   }).replace(/\s{3,}/g, " ");
 }
 
@@ -683,7 +756,6 @@ function textLength(value) {
 function sanitizeGenerationLogForExport(record) {
   const sanitized = removeInternalAiFields(record);
   return {
-    id: sanitized?.id,
     createdAt: sanitized?.createdAt,
     kind: sanitized?.kind,
     session: safeExportSession(sanitized?.session),
@@ -693,6 +765,20 @@ function sanitizeGenerationLogForExport(record) {
       checks: sanitized?.output?.checks,
     },
   };
+}
+
+function buildSafeGenerationLogExport(records) {
+  return safeRecordList(records).map((record, index) => ({
+    recordNo: index + 1,
+    createdAt: safeCopyText(record?.createdAt, 80),
+    kind: safeCopyText(record?.kind, 40),
+    session: safeExportSession(record?.session),
+    inputSummary: record?.inputSummary || {},
+    output: {
+      headings: safeList(record?.output?.headings).map((heading) => safeCopyText(heading, 80)),
+      checks: safeList(record?.output?.checks).map((check) => safeCopyText(check, 160)),
+    },
+  }));
 }
 
 function buildFeedbackNextSteps(feedback = {}) {
@@ -770,13 +856,13 @@ function buildFeedbackNextSteps(feedback = {}) {
 
 function readStoredSession() {
   try {
-    const demoSession = JSON.parse(localStorage.getItem("manabi-demo-session") || "null");
-    if (demoSession?.source === "demo") return demoSession;
+    const demoSession = normalizeStoredDemoSession(JSON.parse(localStorage.getItem("manabi-demo-session") || "null"));
+    if (demoSession) return demoSession;
 
-    const legacySession = JSON.parse(localStorage.getItem("manabi-session") || "null");
+    const legacySession = normalizeStoredDemoSession(JSON.parse(localStorage.getItem("manabi-session") || "null"));
     localStorage.removeItem("manabi-session");
-    if (legacySession?.source === "demo") {
-      localStorage.setItem("manabi-demo-session", JSON.stringify(legacySession));
+    if (legacySession) {
+      safeSetLocalStorage("manabi-demo-session", JSON.stringify(legacySession));
       return legacySession;
     }
     return null;
@@ -954,8 +1040,9 @@ export function AppExperience() {
     if (isDemoSession) {
       const saved = getSavedFeedbackRecords(generationLogKey);
       const nextRecords = [sanitizeGenerationLogForExport(record), ...saved].slice(0, 100);
-      localStorage.setItem(generationLogKey, JSON.stringify(nextRecords));
-      setGenerationCount(nextRecords.length);
+      if (safeSetLocalStorage(generationLogKey, JSON.stringify(nextRecords))) {
+        setGenerationCount(nextRecords.length);
+      }
     } else {
       setGenerationCount((current) => current + 1);
     }
@@ -984,7 +1071,7 @@ export function AppExperience() {
   function saveUsage(nextUsage) {
     setUsage(nextUsage);
     if (isDemoSession) {
-      localStorage.setItem(usageKey, JSON.stringify(nextUsage));
+      safeSetLocalStorage(usageKey, JSON.stringify(nextUsage));
     }
   }
 
@@ -1070,8 +1157,8 @@ export function AppExperience() {
     }
 
     const memo = normalizeMultiline(diary.memo);
-    if (!memo) {
-      setStatus("今日あったことを入力してください。");
+    if (!hasMeaningfulText(memo)) {
+      setStatus("今日あったことを、言葉で入力してください。");
       return;
     }
 
@@ -1157,8 +1244,8 @@ export function AppExperience() {
 
   async function handleFinalDraftCheck() {
     const draft = normalizeMultiline(finalDraft);
-    if (!draft) {
-      setStatus("提出前の記録を入力してください。");
+    if (!hasMeaningfulText(draft)) {
+      setStatus("提出前の記録を、言葉で入力してください。");
       return;
     }
     setBusy(true);
@@ -1210,7 +1297,10 @@ export function AppExperience() {
       setStatus("導入プランは学校契約として管理します。");
       return;
     }
-    localStorage.setItem(passKey, "active");
+    if (!safeSetLocalStorage(passKey, "active")) {
+      setStatus("ブラウザの保存設定により、学校導入モードを保存できませんでした。");
+      return;
+    }
     setHasPracticePass(true);
     setStatus("学校導入モードを有効化しました。");
   }
@@ -1302,6 +1392,11 @@ export function AppExperience() {
   }
 
   function exportGenerationLogs(format) {
+    if (!ENABLE_LOG_EXPORTS) {
+      setStatus("確認記録の書き出しは停止しています。");
+      return;
+    }
+
     const localRecords = isDemoSession ? getSavedFeedbackRecords(generationLogKey) : [];
     const serverRecords = (schoolSummary?.recentLogs || []).map((log) => ({
       id: log.id,
@@ -1318,7 +1413,7 @@ export function AppExperience() {
         checks: log.checks || [],
       },
     }));
-    const records = (isDemoSession ? localRecords : serverRecords).map(sanitizeGenerationLogForExport);
+    const records = buildSafeGenerationLogExport((isDemoSession ? localRecords : serverRecords).map(sanitizeGenerationLogForExport));
     if (records.length === 0) {
       setStatus("保存済みの確認記録はまだありません。");
       return;
@@ -1336,7 +1431,7 @@ export function AppExperience() {
     }
 
     const header = [
-      "id",
+      "recordNo",
       "createdAt",
       "kind",
       "schoolName",
@@ -1347,7 +1442,7 @@ export function AppExperience() {
       "checks",
     ];
     const rows = records.map((record) => [
-      record.id,
+      record.recordNo,
       record.createdAt,
       record.kind,
       record.session?.schoolName,
@@ -1496,6 +1591,7 @@ export function AppExperience() {
               schoolSummary={schoolSummary}
               schoolSummaryStatus={schoolSummaryStatus}
               session={session}
+              enableLogExports={ENABLE_LOG_EXPORTS}
               onExportGenerationCsv={() => exportGenerationLogs("csv")}
               onExportGenerationJson={() => exportGenerationLogs("json")}
             />
@@ -1880,9 +1976,11 @@ function StudentInputStep({
   ].filter((value) => String(value || "").trim()).length;
   return (
     <div className="student-step-card">
-      <SampleLibrary title="安全な架空入力例" description="実データを入れずに、記録と実習先で受けた助言の流れを試せます。安全な表現の確認は「名前を置き換える練習」から始められます。" samples={samples} onSelect={onSample} />
+      <SampleLibrary title="安全な架空入力例" description="実データを入れずに、記録と実習先で受けた助言の流れを試せます。自由入力も最初から架空の場面で試します。安全な表現の確認は「名前を置き換える練習」から始められます。" samples={samples} onSelect={onSample} />
 
-      <p className="quick-safety-note">名前や園名などは、問い返し前に安全な表現へ整えて確認します。気づいた表現は、次の記録から自分でも置き換えやすくなります。</p>
+      <p className="quick-safety-note">
+        名前や園名などは、問い返し前に安全な表現へ整えて確認します。実在の学生・子ども・園を少し置き換えた入力は避けてください。
+      </p>
 
       <div className="student-input-guide" aria-label="入力の進め方">
         <article className={memoReady ? "ready" : ""}>
@@ -2037,6 +2135,8 @@ function StudentReviseStep({ result, feedbackNextSteps, finalDraft, copied, busy
       </section>
     );
   }
+  const resultSections = normalizeResultSections(result);
+  const resultChecks = normalizeResultChecks(result);
   return (
     <section className="student-step-card ai-step" aria-label="問い返し結果と提出前の記録作成">
       <div className="ai-step-head">
@@ -2049,10 +2149,10 @@ function StudentReviseStep({ result, feedbackNextSteps, finalDraft, copied, busy
         </button>
       </div>
       <article className="result inline-result">
-        {result.sections.map((section, index) => (
-          <section className="result-section" key={`${result.headings[index]}-${index}`}>
-            <h3>{result.headings[index]}</h3>
-            <p>{section}</p>
+        {resultSections.map((section, index) => (
+          <section className="result-section" key={`${section.heading}-${index}`}>
+            <h3>{section.heading}</h3>
+            <p>{section.body}</p>
           </section>
         ))}
         {feedbackNextSteps.hasContent && (
@@ -2069,7 +2169,7 @@ function StudentReviseStep({ result, feedbackNextSteps, finalDraft, copied, busy
         <section className="result-section">
           <h3>提出前の自己確認</h3>
           <ul>
-            {result.checks.map((check) => (
+            {resultChecks.map((check) => (
               <li key={check}>{check}</li>
             ))}
           </ul>
@@ -2081,7 +2181,7 @@ function StudentReviseStep({ result, feedbackNextSteps, finalDraft, copied, busy
       </label>
       <div className="actions">
         <button className="secondary-button" type="button" onClick={onBack}>確認画面に戻る</button>
-        <button className="primary-button" type="button" onClick={onFinalCheck} disabled={busy || !finalDraft.trim()}>
+        <button className="primary-button" type="button" onClick={onFinalCheck} disabled={busy || !hasMeaningfulText(finalDraft)}>
           {busy ? "確認中..." : "提出前チェックへ進む"}
         </button>
       </div>
@@ -2092,6 +2192,7 @@ function StudentReviseStep({ result, feedbackNextSteps, finalDraft, copied, busy
 function StudentFinalStep({ finalDraft, finalCheck, copied, busy, onFinalDraftChange, onFinalCheck, onUseSanitizedFinal, onCopyFinal, onBack }) {
   const checkedText = normalizeMultiline(finalDraft);
   const sanitizedText = normalizeMultiline(finalCheck?.payload?.memo || "");
+  const hasFinalDraftText = hasMeaningfulText(finalDraft);
   const canCopyCheckedFinal = Boolean(finalCheck)
     && !finalCheck.blocked
     && (!finalCheck.changed || checkedText === sanitizedText);
@@ -2125,11 +2226,11 @@ function StudentFinalStep({ finalDraft, finalCheck, copied, busy, onFinalDraftCh
       )}
       <div className="actions">
         <button className="secondary-button" type="button" onClick={onBack}>問い返しに戻る</button>
-        <button className="secondary-button" type="button" onClick={onFinalCheck} disabled={busy || !finalDraft.trim()}>{busy ? "確認中..." : "再チェック"}</button>
+        <button className="secondary-button" type="button" onClick={onFinalCheck} disabled={busy || !hasFinalDraftText}>{busy ? "確認中..." : "再チェック"}</button>
         {finalCheck?.changed && (
           <button className="secondary-button" type="button" onClick={onUseSanitizedFinal}>安全化した文を反映</button>
         )}
-        <button className="primary-button" type="button" onClick={onCopyFinal} disabled={!finalDraft.trim() || !canCopyCheckedFinal}>
+        <button className="primary-button" type="button" onClick={onCopyFinal} disabled={!hasFinalDraftText || !canCopyCheckedFinal}>
           {copyLabel}
         </button>
       </div>
@@ -2138,9 +2239,9 @@ function StudentFinalStep({ finalDraft, finalCheck, copied, busy, onFinalDraftCh
 }
 
 function ReviewSummary({ review, compact = false }) {
-  const changes = review?.fieldChanges || [];
-  const findings = review?.findings || [];
-  const contextNotes = review?.contextNotes || [];
+  const changes = safeRecordList(review?.fieldChanges);
+  const findings = safeRecordList(review?.findings);
+  const contextNotes = safeRecordList(review?.contextNotes);
   const hasDetails = changes.length > 0 || findings.length > 0 || contextNotes.length > 0;
   return (
     <section className={`review-summary ${compact ? "compact" : ""} status-${review?.status || "clear"}`}>
@@ -2181,9 +2282,10 @@ function ReviewSummary({ review, compact = false }) {
 }
 
 function SanitizedPreview({ payload, fields, title = "問い返し前に確認する本文" }) {
+  const source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   const visibleFields = fields || Object.keys(CLIENT_FIELD_LABELS);
   const rows = visibleFields
-    .map((field) => [field, payload?.[field]])
+    .map((field) => [field, source[field]])
     .filter(([, value]) => typeof value === "string" && value.trim());
   if (!rows.length) return null;
   return (
@@ -2196,7 +2298,7 @@ function SanitizedPreview({ payload, fields, title = "問い返し前に確認�
         {rows.map(([field, value]) => (
           <article key={field}>
             <strong>{CLIENT_FIELD_LABELS[field] || "本文"}</strong>
-            <p>{value}</p>
+            <p>{safeCopyText(value, 520)}</p>
           </article>
         ))}
       </div>
@@ -2231,7 +2333,7 @@ function SampleLibrary({ title, description, samples, onSelect }) {
   );
 }
 
-function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, schoolSummaryStatus, session, onExportGenerationCsv, onExportGenerationJson }) {
+function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, schoolSummaryStatus, session, enableLogExports, onExportGenerationCsv, onExportGenerationJson }) {
   const usingDemoData = session?.source === "demo" && schoolSummary?.configured === false;
   const demoMetrics = {
     students: demoStudentUsage.length,
@@ -2242,12 +2344,12 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
     activeStudents: demoStudentUsage.filter((student) => student.generations > 0).length,
   };
   const metrics = usingDemoData ? demoMetrics : schoolSummary?.metrics;
-  const reviewQueue = usingDemoData ? demoReviewQueue : schoolSummary?.reviewQueue || [];
-  const recentLogs = schoolSummary?.recentLogs || [];
-  const checkSummary = usingDemoData ? demoCheckSummary : schoolSummary?.checkSummary || [];
-  const studentUsage = usingDemoData ? demoStudentUsage : schoolSummary?.studentUsage || [];
-  const pocMetrics = usingDemoData ? demoPocMetrics : schoolSummary?.pocMetrics || [];
-  const exportDisabled = (metrics?.generations ?? generationCount) === 0;
+  const reviewQueue = usingDemoData ? demoReviewQueue : safeRecordList(schoolSummary?.reviewQueue);
+  const recentLogs = safeRecordList(schoolSummary?.recentLogs);
+  const checkSummary = usingDemoData ? demoCheckSummary : safeRecordList(schoolSummary?.checkSummary);
+  const studentUsage = usingDemoData ? demoStudentUsage : safeRecordList(schoolSummary?.studentUsage);
+  const pocMetrics = usingDemoData ? demoPocMetrics : safeRecordList(schoolSummary?.pocMetrics);
+  const exportDisabled = !enableLogExports || (metrics?.generations ?? generationCount) === 0;
   const workloadPlan = buildTeacherWorkloadPlan(reviewQueue, metrics?.students ?? studentUsage.length);
 
   return (
@@ -2352,7 +2454,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
             <span className="label">確認記録</span>
             <h3>面談準備記録の書き出し</h3>
           </div>
-          <p className="muted">書き出しは面談準備用の概要に絞ります。学生入力や問い返しの根拠は、必要な記録だけ画面上で確認できます。</p>
+          <p className="muted">{enableLogExports ? "書き出しは面談準備用の概要に絞ります。学生入力や問い返しの根拠は、必要な記録だけ画面上で確認できます。" : "PoC前の合意ができるまで、確認記録の書き出しは停止しています。"}</p>
           <div className="feedback-export-actions">
             <button className="secondary-button" type="button" onClick={onExportGenerationCsv} disabled={exportDisabled}>CSV</button>
             <button className="secondary-button" type="button" onClick={onExportGenerationJson} disabled={exportDisabled}>JSON</button>
@@ -2409,7 +2511,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
             <span>1. 学生画面で安全な架空入力例を試す</span>
             <span>2. 安全な表現、問い返し、提出前チェックまで見る</span>
             <span>3. 教員画面で当日確認・授業共有・学生本人の分類を見る</span>
-            <span>4. 学校フォーマットと保存範囲を返信フォームへ返す</span>
+            <span>4. 学校フォーマットと保存範囲をアンケートフォームへ返す</span>
           </div>
         </section>
 
@@ -2484,6 +2586,7 @@ function MetricCard({ label, value, detail }) {
 }
 
 function TeacherPreviewPanel({ title = "教員に確認していただきたいこと", items = teacherPreviewCheckpoints }) {
+  const safeItems = safeRecordList(items);
   return (
     <section className="school-panel teacher-preview-panel">
       <div>
@@ -2492,12 +2595,17 @@ function TeacherPreviewPanel({ title = "教員に確認していただきたい�
         <p className="teacher-preview-lead">PoCに進むかは、機能数ではなく、学生が使えるか、教員負担が増えないか、学校フォーマットに合うかで確認します。</p>
       </div>
       <div className="teacher-preview-grid">
-        {items.map((item) => (
+        {safeItems.map((item) => (
           <article key={item.title}>
             <span>{item.kicker}</span>
             <strong>{item.title}</strong>
             <p>{item.detail}</p>
           </article>
+        ))}
+      </div>
+      <div className="school-step-list" aria-label="アンケートフォームで返す観点">
+        {teacherPreviewReturnItems.map((item, index) => (
+          <span key={item}>{index + 1}. {item}</span>
         ))}
       </div>
     </section>
@@ -2607,7 +2715,7 @@ function AssignmentManagementView({ schoolSummary, schoolSummaryStatus, session 
 }
 
 function StudentManagementView({ schoolSummary, schoolSummaryStatus, session }) {
-  const profiles = schoolSummary?.profiles || [];
+  const profiles = safeRecordList(schoolSummary?.profiles);
   const students = profiles.filter((profile) => profile.role === "student");
   const teachers = profiles.filter((profile) => profile.role !== "student");
 
@@ -2672,9 +2780,10 @@ function StudentManagementView({ schoolSummary, schoolSummaryStatus, session }) 
 }
 
 function RosterList({ profiles }) {
+  const safeProfiles = safeRecordList(profiles);
   return (
     <div className="roster-list">
-      {profiles.map((profile) => (
+      {safeProfiles.map((profile) => (
         <article className="roster-item" key={profile.id}>
           <div>
             <strong>{profile.name || profile.email}</strong>
@@ -2689,8 +2798,8 @@ function RosterList({ profiles }) {
 
 function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
   const usingDemoData = session?.source === "demo" && schoolSummary?.configured === false;
-  const reviewQueue = usingDemoData ? demoReviewQueue : schoolSummary?.reviewQueue || [];
-  const recentLogs = usingDemoData ? demoRecentLogs : schoolSummary?.recentLogs || [];
+  const reviewQueue = usingDemoData ? demoReviewQueue : safeRecordList(schoolSummary?.reviewQueue);
+  const recentLogs = usingDemoData ? demoRecentLogs : safeRecordList(schoolSummary?.recentLogs);
   const filters = ["すべて", ...new Set(reviewQueue.map((item) => item.tag))];
   const priorityFilters = reviewRouteFilters;
   const [activeFilter, setActiveFilter] = useState("すべて");
@@ -3095,7 +3204,7 @@ function getKindLabel(kind) {
 }
 
 function buildTeacherWorkloadPlan(reviewQueue = [], studentCount = 0) {
-  const counts = reviewQueue.reduce((acc, item) => {
+  const counts = safeRecordList(reviewQueue).reduce((acc, item) => {
     acc[getReviewPriorityLabel(item)] += 1;
     return acc;
   }, { 高: 0, 中: 0, 低: 0 });

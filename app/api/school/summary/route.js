@@ -1,6 +1,7 @@
 import { getServerSessionContext, isRestConfigured, supabaseRestFetch } from "../../_supabase.js";
 import { enforceRateLimit } from "../../_rateLimit.js";
 import { enforceSameOriginRequest } from "../../_requestSecurity.js";
+import { redactSensitiveTextForPreview } from "../../_privacy.js";
 
 export const runtime = "nodejs";
 
@@ -298,7 +299,7 @@ function hasNameLikeText(text) {
 
 function removeAllowedAnonymizedTerms(text) {
   return String(text || "").replace(
-    /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生/g,
+    /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生|担任職員|主任職員|実習先指導員/g,
     "",
   );
 }
@@ -318,12 +319,7 @@ function buildInputPreview(input = {}) {
 }
 
 function redactPreviewText(value) {
-  return String(value || "")
-    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "〈メールアドレス〉")
-    .replace(/0\d{1,4}[-ー−]?\d{1,4}[-ー−]?\d{3,4}/g, "〈電話番号〉")
-    .replace(/([一-龯ぁ-んァ-ンA-Za-z0-9]{2,30})(保育園|幼稚園|こども園)/g, "〈園名〉")
-    .replace(/([一-龯ぁ-んァ-ンA-Za-z]{1,12})(くん|ちゃん)/g, "A児")
-    .replace(/([一-龯ぁ-んァ-ンA-Za-z]{1,12})(先生)/g, "担当の先生");
+  return redactSensitiveTextForPreview(value);
 }
 
 function countActiveStudents(logs) {

@@ -12,6 +12,14 @@ This is not a diary-writing shortcut, an auto-grading tool, or a production depl
 - A teacher-facing summary for conversations, class discussion, and student self-check.
 - A public read-only demo route with fictional sample data only.
 
+## BootCamp Progress
+
+This repository also includes public-safe progress notes for Singularity Society BootCamp:
+
+    docs/ss-bootcamp-progress/weekly-updates/
+
+These notes are intentionally limited to product progress, validation status, and next questions. They do not include private review links, credentials, school names, educator names, student data, practicum-site information, or internal work logs.
+
 ## Safety Boundaries
 
 - Do not enter real student names, child names, school names, practicum site names, phone numbers, addresses, diagnoses, family situations, or other personal information.

@@ -77,7 +77,7 @@ const SENSITIVE_REPLACEMENTS = [
   [/(園名|実習先名|施設名)[:：]?\s*[^\s、。]{1,40}/g, "〈園名〉"],
   [MEDICAL_INFO_REDACTION_PATTERN, "〈診断名等〉"],
   [FAMILY_INFO_REDACTION_PATTERN, "〈配慮情報〉"],
-  [/(担任教員名|担任名|職員名|保育者名|先生名)[:：]?\s*[^\s、。]{0,30}/g, "担任の先生"],
+  [/(担任教員名|担任名|職員名|保育者名|先生名)[:：]?\s*[^\s、。]{0,30}/g, "担任職員"],
 ];
 
 const AI_TEXT_FIELDS_BY_KIND = {
@@ -103,7 +103,7 @@ const AI_TEXT_FIELDS_BY_KIND = {
 
 function removeAllowedAnonymizedTerms(text) {
   return String(text || "").replace(
-    /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生/g,
+    /[A-EＡ-Ｅa-eａ-ｅ](児|くん|君|ちゃん|先生)|園[A-EＡ-Ｅa-eａ-ｅ]|実習先園|担任の先生|主任の先生|学校の先生|実習先の先生|担任職員|主任職員|実習先指導員/g,
     "",
   );
 }
@@ -120,10 +120,13 @@ function normalizePossiblyAnonymizedChildReference(raw, name, suffix) {
 }
 
 function normalizePossiblyAnonymizedTeacherReference(raw, name) {
-  if (/^(担任の|主任の|学校の|実習先の)$/.test(name)) return raw;
-  if (/^[A-EＡ-Ｅa-eａ-ｅ]$/.test(name)) return "担任の先生";
+  if (name === "担任の") return "担任職員";
+  if (name === "主任の") return "主任職員";
+  if (name === "学校の") return "学校の教員";
+  if (name === "実習先の") return "実習先指導員";
+  if (/^[A-EＡ-Ｅa-eａ-ｅ]$/.test(name)) return "担任職員";
   const nestedAnonymous = String(name || "").match(/^(.*?)([A-EＡ-Ｅa-eａ-ｅ])$/);
-  if (nestedAnonymous) return `${nestedAnonymous[1]}担任の先生`;
+  if (nestedAnonymous) return `${nestedAnonymous[1]}担任職員`;
   return null;
 }
 
@@ -172,7 +175,7 @@ function buildAiPrivacyBlockMessage(findings) {
   return [
     `入力内容に${labels}が含まれている可能性があります。`,
     "この内容は問い返し処理へ送信せず、入力を止めました。",
-    "子どもの名前、園名、職員名は A児、実習先園、担任の先生 のように置き換え、住所・連絡先・診断名・家庭事情などは入力しないでください。",
+    "子どもの名前、園名、職員名は A児、実習先園、担任職員 のように置き換え、住所・連絡先・診断名・家庭事情などは入力しないでください。",
   ].join("");
 }
 
@@ -234,6 +237,10 @@ export function sanitizeFeedbackForLog(feedback = {}) {
     checked: Array.isArray(feedback.checked) ? feedback.checked.map((item) => cleanShortValue(item, 80)).filter(Boolean).slice(0, 10) : undefined,
     sanitized: true,
   });
+}
+
+export function redactSensitiveTextForPreview(value, maxLength = MAX_LOG_TEXT) {
+  return cleanLongValue(value, maxLength);
 }
 
 function sanitizeFeedbackNextObservationPlan(value) {
@@ -399,11 +406,11 @@ function redactSensitiveText(text) {
     bareNameIndex += 1;
     return label;
   });
-  next = next.replace(/(担任教員名|担任名|職員名|保育者名|先生名)[0-9０-９]*/g, "担任の先生");
+  next = next.replace(/(担任教員名|担任名|職員名|保育者名|先生名)[0-9０-９]*/g, "担任職員");
   next = next.replace(/([一-龯ぁ-んァ-ンA-Za-z0-9０-９]{1,18})(先生)/g, (raw, name) => {
     const normalizedAnonymous = normalizePossiblyAnonymizedTeacherReference(raw, name);
     if (normalizedAnonymous) return normalizedAnonymous;
-    return "担任の先生";
+    return "担任職員";
   });
   return next.replace(/\s{3,}/g, " ");
 }

@@ -35,7 +35,7 @@ const FINDING_MESSAGES = {
   contact_info: "連絡先は問い返しへ進む前に入力へ戻して見直すと安心です。",
   address_or_location: "住所や所在地は問い返しへ進む前に入力へ戻して見直すと安心です。",
   student_or_person_identifier: "学籍番号などの識別情報は問い返しへ進む前に入力へ戻して見直すと安心です。",
-  likely_full_name: "実名と思われる表現は、A児・担任の先生などに置き換えます。",
+  likely_full_name: "実名と思われる表現は、A児・担任職員などに置き換えます。",
   medical_or_family_info: "診断名や家庭事情などの要配慮情報は、本文から外して扱います。",
   guardian_name: "保護者名は問い返しへ進む前に入力へ戻して見直すと安心です。",
 };

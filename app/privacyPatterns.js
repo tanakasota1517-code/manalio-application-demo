@@ -1,7 +1,7 @@
 export const COMMON_JAPANESE_SURNAME_PATTERN = "(佐藤|鈴木|高橋|田中|伊藤|渡辺|山本|中村|小林|加藤|吉田|山田|佐々木|山口|松本|井上|木村|斎藤|清水|山崎|池田|橋本|石川|前田|藤田|後藤|岡田|長谷川|村上|近藤|石井|坂本|遠藤|青木|藤井|西村|福田|太田|三浦|藤原|岡本|松田|中川|中島|原田|小川|竹内|和田|中野|金子|上田|酒井|工藤|横山|宮崎|宮本|内田|柴田|谷口|安藤|丸山|今井|高木|大野|杉山|増田|小島|平野|田村|大塚|久保|松井|岩崎|桜井|菅原|野口|新井|渡部|大西|杉本|古川|浜田|市川|大橋|小野|田口|平田|川口|川崎|飯田|吉川|本田|久保田|沢田|吉村|岩田|中西|服部|樋口|福島|川上|永井|松岡|田辺|森田|黒田|矢野|大久保|内藤|松尾|菊地|野村|平井|望月|岩本|片山|川島|武田|広瀬|北村|荒木|大谷|松下|小山|石田|上野|篠原|須藤|萩原|大島|小沢|宮川|成田|小田|石原|横田|岡崎|大森|栗原|伊東|松浦|三宅|浅野|西田|大場|大村|熊谷|星野|河野|平山|村田|多田|島田)";
 export const COMMON_GIVEN_NAME_PATTERN = "(太郎|花子|一郎|二郎|三郎|健太|翔太|陽太|悠真|大翔|蓮|湊|蒼|樹|陽葵|凛|結菜|美咲|優奈|愛|葵|さくら|ひなた|はると|ゆうと)";
 
-export const PHONE_PATTERN_SOURCE = String.raw`(?:\(?[0０][0-9０-９]{1,4}\)?[\s　\-ー−－]?[0-9０-９]{1,4}[\s　\-ー−－]?[0-9０-９]{3,4})`;
+export const PHONE_PATTERN_SOURCE = String.raw`(?:\(?[0０][0-9０-９]{1,4}\)?[\s　\-ー−－.．/／]?[0-9０-９]{1,4}[\s　\-ー−－.．/／]?[0-9０-９]{3,4})`;
 export const CONTACT_LABEL_PATTERN_SOURCE = String.raw`(?:(?:LINE\s*ID|ラインID|連絡先|電話番号|TEL|Tel|tel)[:：は]?\s*[A-Za-z0-9._@\-ー−－０-９ぁ-んァ-ン]{2,60}|電話[:：]\s*[A-Za-z0-9._@\-ー−－０-９ぁ-んァ-ン]{2,60})`;
 export const POSTAL_CODE_PATTERN_SOURCE = String.raw`〒?\s*[0-9０-９]{3}[-ー−－]?[0-9０-９]{4}`;
 export const JAPANESE_ADDRESS_PATTERN_SOURCE = String.raw`(?:${POSTAL_CODE_PATTERN_SOURCE}|(?:住所|所在地|自宅|住まい)[:：]?\s*[^\s、。]{2,80}|(?:東京都|北海道|大阪府|京都府|[一-龯]{2,3}県)[一-龯ぁ-んァ-ン0-9０-９\s　\-ー−－丁目番地号市区町村]{2,80})`;
@@ -40,6 +40,6 @@ export function createGuardianNamePattern(flags = "") {
 export function normalizePrivacyScanText(value) {
   return String(value || "")
     .normalize("NFKC")
-    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .replace(/[\u200B-\u200D\uFEFF\u202A-\u202E\u2066-\u2069]/g, "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
 }
