@@ -382,8 +382,8 @@ const teacherPreviewCheckpoints = [
   },
   {
     kicker: "教員画面",
-    title: "確認負担を増やさないか",
-    detail: "当日確認、授業共有、学生本人の自己確認に分ける粒度が、実際の運用に合うかを見ます。",
+    title: "次の支援に使えるか",
+    detail: "面談で見る、授業で扱う、学生本人に戻す、という対応先の分け方が実際の運用に合うかを見ます。",
   },
   {
     kicker: "学校フォーマット",
@@ -1703,29 +1703,29 @@ function FeedbackPanel({ feedback, onChange }) {
         </div>
       </div>
       <p className="feedback-note">
-        言われたことをそのまま貼らず、自分がどう受け止めたかを短く書きます。
+        受けた助言は、要点だけを自分の言葉で整理します。迷う部分は、担当教員への相談に残せます。
       </p>
       <div className="feedback-field-grid">
         <TextAreaField
-          label="今日の指導を受けて、自分が学んだこと"
+          label="助言の要点"
           value={feedback.received}
-          placeholder="例：子どもの姿だけでなく、保育者の関わりにも目を向ける必要があると学んだ。"
+          placeholder="例：子どもの姿だけでなく、保育者の関わりにも目を向けるとよいと助言を受けた。"
           onChange={(value) => onChange("received", value)}
         />
         <TextAreaField
-          label="自分はそれをどう理解したか"
+          label="自分の理解"
           value={feedback.interpretation}
           placeholder="例：子どもの行動だけで終わらず、声かけ前後の変化を見る必要があると理解した。"
           onChange={(value) => onChange("interpretation", value)}
         />
         <TextAreaField
-          label="まだ分からないこと・確認したいこと"
+          label="まだ迷っていること"
           value={feedback.unclear}
           placeholder="例：保育者の意図を、どこまで自分の考察として書いてよいか分からない。"
           onChange={(value) => onChange("unclear", value)}
         />
         <TextAreaField
-          label="明日、具体的に変えたい行動"
+          label="明日、見たいこと・試したいこと"
           value={feedback.tomorrowAction}
           placeholder="例：声かけの前後で子どもの姿がどう変わったかをメモする。"
           onChange={(value) => onChange("tomorrowAction", value)}
@@ -2057,7 +2057,7 @@ function StudentInputStep({
           <span>3</span>
           <div>
             <strong>実習先で受けた助言</strong>
-            <p>その日の指導を、翌日の観察と学校の教員への相談につなげます。</p>
+            <p>助言の要点を、自分の理解、翌日の観察、担当教員への相談につなげます。</p>
           </div>
         </div>
         <div className="wide">
@@ -2518,7 +2518,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
         <section className="school-panel">
           <div>
             <span className="label">確認候補</span>
-            <h3>教員が確認したい観点</h3>
+            <h3>教員の次アクション候補</h3>
           </div>
           <div className="review-list">
             {reviewQueue.length === 0 ? (

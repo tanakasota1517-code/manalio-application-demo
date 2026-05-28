@@ -78,8 +78,8 @@ const reviewerHighlights = [
     body: "実習先で受けた助言を、次の日に何を見るか、どう関わるかへつなげます。",
   },
   {
-    title: "教員は面談に使う",
-    body: "全件添削や成績判定ではなく、学生との面談や授業で扱う候補を整理します。",
+    title: "教員は支援に使う",
+    body: "全件添削や成績判定ではなく、学生との面談・授業で扱う候補を整理します。",
   },
 ];
 
@@ -120,7 +120,7 @@ export default function DemoPage() {
             <h1>学生が書き、気づき、翌日の観察へ戻る流れ。</h1>
             <p>
               Manalioは、実習日誌を代わりに完成させる画面ではありません。
-              学生が自分で書いた記録をもとに、記録前の気づき、問い返し、教員の面談準備へつなげる流れを確認できます。
+              学生が自分で書いた記録をもとに、記録前の気づき、問い返し、教員が支援すべき点の整理へつなげる流れを確認できます。
             </p>
             <div className="demo-assurance-list" aria-label="この体験ページの前提">
               {demoAssurances.map((item) => (
@@ -137,7 +137,7 @@ export default function DemoPage() {
               <span>学生入力</span>
               <span>記録前の気づき</span>
               <span>問い返し</span>
-              <span>教員整理</span>
+              <span>教員支援</span>
             </div>
           </div>
         </section>

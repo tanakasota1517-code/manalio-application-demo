@@ -347,7 +347,7 @@ export default function Home() {
             <ul>
               <li>学生の振り返り状況を必要範囲で確認</li>
               <li>当日見る候補を高優先だけに絞り込み</li>
-              <li>教員が確認したい観点を設定・共有</li>
+              <li>教員が支援に使う観点を設定・共有</li>
               <li>実習後面談に使う振り返り材料を整理</li>
             </ul>
             <div className="manalio-workload-mini" aria-label="教員確認の優先度">
