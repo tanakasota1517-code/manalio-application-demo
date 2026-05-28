@@ -1976,6 +1976,16 @@ function StudentInputStep({
   ].filter((value) => String(value || "").trim()).length;
   return (
     <div className="student-step-card">
+      <div className="student-next-action-strip" aria-label="次にすること">
+        <strong>{memoReady ? "安全確認へ進めます" : "まず1場面だけ書けば進めます"}</strong>
+        <span>
+          {memoReady
+            ? "下のボタンで、問い返し前の本文を確認します。"
+            : "入力例を選ぶか、見たこと・自分の関わりを1つだけ書いてください。"}
+        </span>
+        <em>{supportCount >= 2 ? "助言や明日の観察も入っています" : "考え・明日・助言は後から足せます"}</em>
+      </div>
+
       <SampleLibrary title="安全な架空入力例" description="実データを入れずに、記録と実習先で受けた助言の流れを試せます。自由入力も最初から架空の場面で試します。安全な表現の確認は「名前を置き換える練習」から始められます。" samples={samples} onSelect={onSample} />
 
       <p className="quick-safety-note">

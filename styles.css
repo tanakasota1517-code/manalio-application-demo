@@ -1346,6 +1346,40 @@ h2 {
   display: grid;
 }
 
+.student-next-action-strip {
+  align-items: center;
+  background: #eef8f5;
+  border: 1px solid #b8ded5;
+  border-radius: 14px;
+  display: grid;
+  gap: 5px;
+  grid-template-columns: minmax(130px, max-content) minmax(0, 1fr) max-content;
+  padding: 12px 14px;
+}
+
+.student-next-action-strip strong {
+  color: #123b36;
+  font-size: 14px;
+}
+
+.student-next-action-strip span {
+  color: #48615e;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.student-next-action-strip em {
+  color: #2c635c;
+  background: #ffffffb8;
+  border: 1px solid #d3e7e2;
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .quick-safety-note {
   color: #48615e;
   background: #fffdf6;
@@ -2685,7 +2719,17 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
   }
 
   .student-flow-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     min-width: 0;
+  }
+
+  .student-next-action-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .student-next-action-strip em {
+    justify-self: start;
+    white-space: normal;
   }
 
   .student-step-card .sample-grid {
