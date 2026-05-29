@@ -2,7 +2,7 @@ import { DetailCta, PublicFooter, PublicHeader } from "../site-components";
 
 export const metadata = {
   title: "機能 | Manalio",
-  description: "Manalioの学生向け省察支援、翌日の観察ポイント化、教員向け確認レビュー、学校フォーマット、面談サマリーの機能概要です。",
+  description: "Manalioの学生向け省察支援、翌日の観察ポイント化、教員向け確認レビュー、学校フォーマット、教員が面談前に確認するポイントの機能概要です。",
   alternates: {
     canonical: "/product",
   },
@@ -37,7 +37,7 @@ export default function ProductPage() {
             <article>
               <span>02</span>
               <strong>教員画面</strong>
-              <p>教員確認が必要な候補、学生ごとの振り返り概要、実習後面談に使うサマリーを、必要な範囲に絞って確認できます。</p>
+              <p>教員確認が必要な候補、学生ごとの振り返り概要、教員が面談前に確認するポイントを、必要な範囲に絞って確認できます。</p>
             </article>
             <article>
               <span>03</span>
@@ -86,7 +86,7 @@ export default function ProductPage() {
             <p>言われたこと・自分の理解・まだ分からないことを分ける</p>
             <p>明日見る子どもの姿と保育者の関わりを整理</p>
             <p>同じ指導を流さないための自己確認項目を提示</p>
-            <p>実習後面談で扱う論点候補として残す</p>
+            <p>実習後の面談で確認したいポイントとして残す</p>
           </div>
         </section>
 
@@ -102,7 +102,7 @@ export default function ProductPage() {
           <div className="detail-list">
             <p>クラス別・課題別に、学習支援に必要な範囲を確認</p>
             <p>優先度別の自己確認結果</p>
-            <p>実習後面談で扱う学生ごとの振り返りサマリー</p>
+            <p>実習後の面談で確認したい学生ごとのポイント</p>
             <p>学校指定フォーマットの管理</p>
           </div>
         </section>

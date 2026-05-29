@@ -580,9 +580,11 @@ function normalizeStoredDemoSession(session) {
   };
 }
 
-function buildInputSummary(input = {}) {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+function buildInputSummary(input = {}, existingSummary = {}) {
+  const safeExisting = safeExistingInputSummary(existingSummary);
+  if (!input || typeof input !== "object" || Array.isArray(input)) return safeExisting;
   return {
+    ...safeExisting,
     date: safeCopyText(input.date, 30),
     age: safeCopyText(input.age, 40),
     scene: safeCopyText(input.scene, 80),
@@ -594,6 +596,40 @@ function buildInputSummary(input = {}) {
     feedbackReceivedLength: textLength(input.feedbackReceived),
     feedbackTomorrowActionLength: textLength(input.feedbackTomorrowAction),
     privacyFlags: buildClientPrivacyFlags(input),
+  };
+}
+
+function safeExistingInputSummary(summary = {}) {
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) return {};
+  return {
+    date: safeCopyText(summary.date, 30),
+    age: safeCopyText(summary.age, 40),
+    scene: safeCopyText(summary.scene, 80),
+    tone: safeCopyText(summary.tone, 30),
+    goalLength: Number.isFinite(summary.goalLength) ? summary.goalLength : 0,
+    memoLength: Number.isFinite(summary.memoLength) ? summary.memoLength : 0,
+    reflectionLength: Number.isFinite(summary.reflectionLength) ? summary.reflectionLength : 0,
+    tomorrowTaskLength: Number.isFinite(summary.tomorrowTaskLength) ? summary.tomorrowTaskLength : 0,
+    feedbackReceivedLength: Number.isFinite(summary.feedbackReceivedLength) ? summary.feedbackReceivedLength : 0,
+    feedbackTomorrowActionLength: Number.isFinite(summary.feedbackTomorrowActionLength) ? summary.feedbackTomorrowActionLength : 0,
+    privacyFlags: sanitizePrivacyFlags(summary.privacyFlags),
+  };
+}
+
+function sanitizePrivacyFlags(flags = {}) {
+  if (!flags || typeof flags !== "object" || Array.isArray(flags)) return {};
+  return {
+    hasChildNameLikeText: Boolean(flags.hasChildNameLikeText),
+    hasSchoolNameLikeText: Boolean(flags.hasSchoolNameLikeText),
+    hasMedicalOrFamilyInfo: Boolean(flags.hasMedicalOrFamilyInfo),
+    hasContactInfo: Boolean(flags.hasContactInfo),
+    hasPromptInstructionLikeText: Boolean(flags.hasPromptInstructionLikeText),
+    hasLikelyFullName: Boolean(flags.hasLikelyFullName),
+    hasPhoneLikeText: Boolean(flags.hasPhoneLikeText),
+    hasEmailLikeText: Boolean(flags.hasEmailLikeText),
+    hasIdentifierLikeText: Boolean(flags.hasIdentifierLikeText),
+    hasSensitiveContext: Boolean(flags.hasSensitiveContext),
+    hasAllowedAnonymizedText: Boolean(flags.hasAllowedAnonymizedText),
   };
 }
 
@@ -759,7 +795,7 @@ function sanitizeGenerationLogForExport(record) {
     createdAt: sanitized?.createdAt,
     kind: sanitized?.kind,
     session: safeExportSession(sanitized?.session),
-    inputSummary: buildInputSummary(sanitized?.input),
+    inputSummary: buildInputSummary(sanitized?.input, sanitized?.inputSummary),
     output: {
       headings: sanitized?.output?.headings,
       checks: sanitized?.output?.checks,
@@ -889,6 +925,7 @@ export function AppExperience() {
   const [resultMeta, setResultMeta] = useState(null);
   const [feedback, setFeedback] = useState(initialFeedback);
   const [studentFlowStep, setStudentFlowStep] = useState("input");
+  const [selectedSampleId, setSelectedSampleId] = useState("");
   const [privacyReview, setPrivacyReview] = useState(null);
   const [checkedPayload, setCheckedPayload] = useState(null);
   const [finalDraft, setFinalDraft] = useState("");
@@ -1090,6 +1127,7 @@ export function AppExperience() {
     if (!keepInput) {
       setDiary({ ...initialDiary, date: todayKey });
       resetFeedback();
+      setSelectedSampleId("");
     }
   }
 
@@ -1102,6 +1140,7 @@ export function AppExperience() {
   }
 
   function loadDiarySample(sample) {
+    setSelectedSampleId(sample.id);
     setDiary((current) => ({
       ...current,
       ...sample.values,
@@ -1528,19 +1567,21 @@ export function AppExperience() {
             </div>
           )}
 
-          <nav className="nav-list" aria-label="機能">
-            {visibleNavItems.map(([view, label]) => (
-              <button
-                key={view}
-                className={`nav-item ${currentView === view ? "active" : ""}`}
-                type="button"
-                aria-current={currentView === view ? "page" : undefined}
-                onClick={() => setActiveView(view)}
-              >
-                {label}
-              </button>
-            ))}
-          </nav>
+          {(!isStudent || visibleNavItems.length > 1) && (
+            <nav className="nav-list" aria-label="機能">
+              {visibleNavItems.map(([view, label]) => (
+                <button
+                  key={view}
+                  className={`nav-item ${currentView === view ? "active" : ""}`}
+                  type="button"
+                  aria-current={currentView === view ? "page" : undefined}
+                  onClick={() => setActiveView(view)}
+                >
+                  {label}
+                </button>
+              ))}
+            </nav>
+          )}
 
           {!isStudent && <div className="note">
             <span className="label">導入方針</span>
@@ -1555,6 +1596,7 @@ export function AppExperience() {
               tone={tone}
               busy={busy}
               samples={diarySamples}
+              selectedSampleId={selectedSampleId}
               feedback={feedback}
               onToneChange={setTone}
               onChange={updateDiary}
@@ -1795,6 +1837,7 @@ function DiaryView({
   tone,
   busy,
   samples,
+  selectedSampleId,
   feedback,
   flowStep,
   privacyReview,
@@ -1857,6 +1900,7 @@ function DiaryView({
           tone={tone}
           busy={busy}
           samples={samples}
+          selectedSampleId={selectedSampleId}
           feedback={feedback}
           privacyCheck={privacyCheck}
           onToneChange={onToneChange}
@@ -1959,6 +2003,7 @@ function StudentInputStep({
   tone,
   busy,
   samples,
+  selectedSampleId,
   feedback,
   privacyCheck,
   onToneChange,
@@ -1986,29 +2031,11 @@ function StudentInputStep({
         <em>{supportCount >= 2 ? "助言や明日の観察も入っています" : "考え・明日・助言は後から足せます"}</em>
       </div>
 
-      <SampleLibrary title="安全な架空入力例" description="実データを入れずに、記録と実習先で受けた助言の流れを試せます。自由入力も最初から架空の場面で試します。安全な表現の確認は「名前を置き換える練習」から始められます。" samples={samples} onSelect={onSample} />
+      <SampleLibrary title="安全な架空入力例" description="1つ選ぶと、記録、助言、明日の観察まで入ります。自由入力も架空の場面で試せます。" samples={samples} selectedSampleId={selectedSampleId} onSelect={onSample} />
 
       <p className="quick-safety-note">
         名前や園名などは、問い返し前に安全な表現へ整えて確認します。実在の学生・子ども・園を少し置き換えた入力は避けてください。
       </p>
-
-      <div className="student-input-guide" aria-label="入力の進め方">
-        <article className={memoReady ? "ready" : ""}>
-          <span>必須</span>
-          <strong>見た場面を書く</strong>
-          <p>{memoReady ? "入力済み。安全確認へ進めます。" : "1場面だけで進めます。"}</p>
-        </article>
-        <article className={supportCount >= 2 ? "ready" : ""}>
-          <span>あると良い</span>
-          <strong>考え・明日・助言</strong>
-          <p>{supportCount >= 2 ? "問い返しが具体化します。" : "入力例で自動入力されます。"}</p>
-        </article>
-        <article>
-          <span>次の手順</span>
-          <strong>安全確認</strong>
-          <p>問い返し前に、整えた本文を確認します。</p>
-        </article>
-      </div>
 
       <form className="form-grid" onSubmit={onSubmit}>
         <div className="form-section-title wide">
@@ -2316,7 +2343,7 @@ function SanitizedPreview({ payload, fields, title = "問い返し前に確認�
   );
 }
 
-function SampleLibrary({ title, description, samples, onSelect }) {
+function SampleLibrary({ title, description, samples, selectedSampleId = "", onSelect }) {
   return (
     <section className="sample-library" aria-label={title}>
       <div className="sample-library-head">
@@ -2328,8 +2355,17 @@ function SampleLibrary({ title, description, samples, onSelect }) {
       </div>
       <div className="sample-grid">
         {samples.map((sample) => (
-          <button className="sample-card" key={sample.id} type="button" onClick={() => onSelect(sample)}>
-            <strong>{sample.title}</strong>
+          <button
+            className={`sample-card ${selectedSampleId === sample.id ? "selected" : ""}`}
+            key={sample.id}
+            type="button"
+            aria-pressed={selectedSampleId === sample.id}
+            onClick={() => onSelect(sample)}
+          >
+            <span className="sample-card-title-row">
+              <strong>{sample.title}</strong>
+              {selectedSampleId === sample.id && <em>読み込み済み</em>}
+            </span>
             <span>{sample.description}</span>
             <span className="sample-tags">
               {sample.tags.map((tag) => (
@@ -2367,10 +2403,10 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
       <div className="context-bar">
         <div>
           <span className="context-label">面談準備・確認レビュー</span>
-          <p>{session?.schoolName || "さくら保育者養成校"} の学生の振り返りを、実習後面談で確認しやすい形に整理</p>
+          <p>{session?.schoolName || "さくら保育者養成校"} の学生の振り返りを、教員が支援前に確認しやすい形に整理</p>
         </div>
         <div className="context-stats" aria-label="面談準備の特徴">
-          <span>面談サマリー</span>
+          <span>教員確認ポイント</span>
           <span>根拠確認</span>
           <span>確認レビュー</span>
         </div>
@@ -2379,7 +2415,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
       <div className="toolbar">
         <div>
           <span className="label">教員向け</span>
-          <h2>実習後面談と確認レビュー</h2>
+          <h2>面談準備と確認レビュー</h2>
         </div>
         <span className="badge">学校導入</span>
       </div>
@@ -2714,7 +2750,7 @@ function AssignmentManagementView({ schoolSummary, schoolSummaryStatus, session 
           <h3>課題作成の型</h3>
         </div>
         <div className="assignment-template-grid">
-          {["サンプル場面を選ぶ", "学生が事実・考察・明日の課題を書く", "AIが問い返しと安全確認を返す", "学生が見直し、必要なら実習担当教員へ相談", "教員が面談サマリーを確認"].map((item, index) => (
+          {["サンプル場面を選ぶ", "学生が事実・考察・明日の課題を書く", "AIが問い返しと安全確認を返す", "学生が見直し、必要なら実習担当教員へ相談", "教員が面談前の確認ポイントを見る"].map((item, index) => (
             <span key={item}>{index + 1}. {item}</span>
           ))}
         </div>
@@ -2913,7 +2949,7 @@ function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
           <p className="review-focus-note">
             初期表示は「当日確認」です。当日確認は個別に見る候補、授業共有はクラスで扱う候補、学生本人は提出前の自己確認へ返す候補です。
           </p>
-          <p className="muted">{schoolSummaryStatus || "通常は面談サマリー中心で扱い、必要な候補だけ根拠を確認します。学生が省察チェックを行うと、確認候補と面談準備用の記録がここに集まります。"}</p>
+          <p className="muted">{schoolSummaryStatus || "通常は面談前に確認するポイントを中心に扱い、必要な候補だけ根拠を確認します。学生が省察チェックを行うと、確認候補と面談準備用の記録がここに集まります。"}</p>
         </section>
 
         <div className="review-workspace">
@@ -3022,7 +3058,7 @@ function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
             <h3>確認候補の扱い</h3>
           </div>
           <div className="school-step-list">
-            {["個人情報・要配慮情報は当日確認", "共通テーマは授業共有へ", "入力不足は学生本人の提出前の自己確認へ", "実習後面談ではサマリー中心に確認"].map((item, index) => (
+            {["個人情報・要配慮情報は当日確認", "共通テーマは授業共有へ", "入力不足は学生本人の提出前の自己確認へ", "教員が面談前に確認するポイントとして扱う"].map((item, index) => (
               <span key={item}>{index + 1}. {item}</span>
             ))}
           </div>
