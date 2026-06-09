@@ -27,6 +27,16 @@ const STATUSES = new Set(["", "clear", "review", "blocked", "completed", "copied
 const SAMPLE_IDS = new Set(["", "thin-note", "evaluation-words", "privacy-check", "outdoor-play"]);
 
 export async function GET() {
+  if (isPublicDemoOnly()) {
+    return jsonNoStore(
+      {
+        code: "public_demo_api_disabled",
+        error: "公開デモでは、このAPIを使用しません。",
+      },
+      403,
+    );
+  }
+
   return jsonNoStore(
     {
       code: "method_not_allowed",
@@ -37,6 +47,16 @@ export async function GET() {
 }
 
 export async function POST(request) {
+  if (isPublicDemoOnly()) {
+    return jsonNoStore(
+      {
+        code: "public_demo_api_disabled",
+        error: "公開デモでは、このAPIを使用しません。",
+      },
+      403,
+    );
+  }
+
   const originBlocked = enforceSameOriginRequest(request);
   if (originBlocked) return originBlocked;
 
@@ -136,6 +156,10 @@ export async function POST(request) {
       500,
     );
   }
+}
+
+function isPublicDemoOnly() {
+  return process.env["MANABI_PUBLIC_DEMO_ONLY"] === "true";
 }
 
 function isAccessLoggingEnabled() {

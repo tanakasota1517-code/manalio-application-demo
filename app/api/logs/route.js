@@ -17,6 +17,22 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3
 export const runtime = "nodejs";
 
 export async function GET() {
+  if (isPublicDemoOnly()) {
+    return Response.json(
+      {
+        persisted: false,
+        code: "public_demo_api_disabled",
+        error: "公開デモでは、このAPIを使用しません。",
+      },
+      {
+        status: 403,
+        headers: {
+          "cache-control": "no-store",
+        },
+      },
+    );
+  }
+
   return Response.json(
     {
       code: "method_not_allowed",
@@ -28,6 +44,22 @@ export async function GET() {
 
 export async function POST(request) {
   try {
+    if (isPublicDemoOnly()) {
+      return Response.json(
+        {
+          persisted: false,
+          code: "public_demo_api_disabled",
+          error: "公開デモでは、このAPIを使用しません。",
+        },
+        {
+          status: 403,
+          headers: {
+            "cache-control": "no-store",
+          },
+        },
+      );
+    }
+
     const sameOriginResponse = enforceSameOriginRequest(request);
     if (sameOriginResponse) return sameOriginResponse;
 
@@ -115,6 +147,10 @@ export async function POST(request) {
       { status: error.status || 500 },
     );
   }
+}
+
+function isPublicDemoOnly() {
+  return process.env["MANABI_PUBLIC_DEMO_ONLY"] === "true";
 }
 
 function isExpectedClientLogError(error) {

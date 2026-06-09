@@ -99,6 +99,7 @@ const STAFF_NAV_ITEMS = [
   ["formats", "フォーマット"],
   ["pass", "導入プラン"],
 ];
+const PUBLIC_DEMO_HIDDEN_STAFF_VIEWS = new Set(["formats", "pass"]);
 
 const diarySamples = [
   {
@@ -413,9 +414,9 @@ const teacherPreviewCheckpoints = [
 ];
 
 const teacherPreviewReturnItems = [
-  "利用前に最低限直す点",
+  "授業で先に確認したい点",
   "教員画面に出ると役立つ情報・出ない方がよい情報",
-  "学校フォーマットに合わせるために必要な見出し",
+  "学校フォーマットに合わせて残したい見出し",
 ];
 
 const pocDecisionItems = [
@@ -604,6 +605,26 @@ function safeList(value) {
 
 function safeRecordList(value) {
   return safeList(value).filter((item) => item && typeof item === "object" && !Array.isArray(item));
+}
+
+function buildPublicDemoSession(role = "student") {
+  const safeRole = role === "teacher" ? "teacher" : "student";
+  return {
+    source: "demo",
+    role: safeRole,
+    roleLabel: safeRole === "teacher" ? "教員" : "学生",
+    name: safeRole === "teacher" ? "実習担当教員" : "実習生",
+    email: safeRole === "teacher" ? "teacher@example.ac.jp" : "student@example.ac.jp",
+    schoolName: "さくら保育者養成校",
+    className: "保育実習I / 2年A組",
+    signedInAt: new Date().toISOString(),
+  };
+}
+
+function normalizePublicDemoReturnHref(value) {
+  const text = String(value || "").trim();
+  if (text === "/demo" || text.startsWith("/demo/")) return text;
+  return "/demo";
 }
 
 function normalizeStoredDemoSession(session) {
@@ -933,6 +954,125 @@ function buildFeedbackNextSteps(feedback = {}) {
   };
 }
 
+function buildClientDemoGeneration(payload = {}) {
+  const scene = safeCopyText(payload.scene || "実習場面", 80);
+  const memo = safeCopyText(payload.memo || "", 180);
+  const reflection = safeCopyText(payload.reflection || "", 180);
+  const tomorrowTask = safeCopyText(payload.tomorrowTask || "", 180);
+  return {
+    headings: [
+      "観察した事実",
+      "考え直す問い",
+      "安全な表現",
+      "明日の観察",
+      "教員に相談する点",
+    ],
+    sections: [
+      memo
+        ? `${scene}で見たことを、できた/できないの評価ではなく、行動ややりとりとして整理できています。`
+        : "まず見たことを一つ選び、行動、言葉、周囲の状況に分けて書いてみましょう。",
+      reflection
+        ? `「${reflection}」について、そう考えた根拠になる子どもの姿をもう一つ探してみましょう。`
+        : "自分がなぜそう考えたのか、見た事実と考えたことを分けて確認しましょう。",
+      "実名、園名、家庭事情、気持ちの断定が入る場合は、A児、実習先、見られた行動のような表現へ戻します。",
+      tomorrowTask
+        ? `明日は「${tomorrowTask}」を、保育者の関わりや環境の変化と合わせて見てみましょう。`
+        : "明日は、同じ場面で子どもの表情、手の動き、周囲との関わりを一つ選んで観察しましょう。",
+      "迷った表現や実習先で受けた助言の解釈は、提出前に学校の担当教員へ確認する相談点として残しましょう。",
+    ],
+    checks: [
+      "入力にない事実を足していませんか。",
+      "子どもの気持ちや性格を決めつけず、見た行動として書けていますか。",
+      "実名、園名、家庭事情など特定につながる情報を避けていますか。",
+      "実習先で受けた助言を、明日の観察に戻せていますか。",
+    ],
+  };
+}
+
+const CLIENT_PRIVACY_FIELD_LABELS = {
+  date: "日付",
+  weather: "天気",
+  age: "クラス・年齢",
+  scene: "場面",
+  goal: "今日のねらい",
+  memo: "見たこと・自分の関わり",
+  reflection: "自分で考えたこと",
+  tomorrowTask: "明日見たいこと・相談したいこと",
+  feedbackGuidanceCategory: "受け止めた観点",
+  feedbackReceived: "実習先で受けた助言",
+  feedbackInterpretation: "助言への自分の理解",
+  feedbackUnclear: "まだ分からないこと",
+  feedbackTomorrowAction: "明日変えたい行動",
+  feedbackTeacherQuestion: "学校の担当教員に相談したいこと",
+  finalDraft: "提出前の記録",
+};
+
+function buildClientPrivacyReview(kind, payload = {}, phase = "pre_ai") {
+  const source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const sanitizedPayload = Object.fromEntries(
+    Object.entries(source)
+      .filter(([, value]) => typeof value === "string")
+      .map(([key, value]) => [key, redactSensitiveText(value)]),
+  );
+  const check = buildClientPrivacyCheck(source);
+  const changed = Object.entries(sanitizedPayload).some(([key, value]) => source[key] !== value);
+  const fieldChanges = Object.entries(sanitizedPayload)
+    .filter(([key, value]) => source[key] !== value)
+    .map(([key, value]) => ({
+      field: key,
+      label: CLIENT_PRIVACY_FIELD_LABELS[key] || key,
+      action: "auto_redacted",
+      severity: "suggestion",
+      actionLabel: "別の言い方",
+      title: "自然に伝わる表現案があります",
+      after: safeCopyText(value, 160),
+    }));
+  const findings = [
+    ...check.blockers.map((message, index) => ({
+      code: `local_blocker_${index + 1}`,
+      label: "個人が分かるかも",
+      severity: "must_fix",
+      actionLabel: "個人が分かるかも",
+      message,
+    })),
+    ...check.warnings.map((message, index) => ({
+      code: `local_warning_${index + 1}`,
+      label: "記録前の確認",
+      severity: "suggestion",
+      actionLabel: "記録前の確認",
+      message,
+    })),
+  ];
+  const contextNotes = check.notes.map((message, index) => ({
+    code: `local_note_${index + 1}`,
+    label: "置き換え済み表現",
+    severity: "suggestion",
+    actionLabel: "別の言い方",
+    message,
+  }));
+  const blocked = check.blockers.length > 0;
+  return {
+    kind,
+    phase,
+    status: blocked ? "blocked" : changed || findings.length > 0 || contextNotes.length > 0 ? "review" : "clear",
+    changed,
+    blocked,
+    payload: sanitizedPayload,
+    fieldChanges,
+    findings,
+    contextNotes,
+    summary: blocked
+      ? "公開デモ内で安全化だけでは扱いにくい表現があります。入力に戻って架空データへ整えてください。"
+      : changed
+        ? "公開デモ内で、特定につながる可能性がある表現を置き換えました。"
+        : "公開デモ内で安全確認を行いました。目立つ個人情報候補は見つかっていません。",
+    guardrail: {
+      local: "checked",
+      bedrockMode: "off",
+    },
+  };
+}
+
 function readStoredSession() {
   if (!ALLOW_STORED_DEMO_SESSION) {
     clearAppLocalStorage();
@@ -954,13 +1094,12 @@ function readStoredSession() {
   }
 }
 
-export function AppExperience() {
+export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/demo" } = {}) {
   const todayKey = useMemo(() => getLocalDateKey(), []);
   const usageKey = `manabi-diary-usage-${todayKey}`;
   const feedbackKey = "manabi-diary-feedback";
   const generationLogKey = "manabi-generation-logs";
   const passKey = "manabi-practice-pass-demo";
-  const staffViewIds = useMemo(() => STAFF_NAV_ITEMS.map(([view]) => view), []);
 
   const [activeView, setActiveView] = useState("diary");
   const [tone, setTone] = useState("balanced");
@@ -992,42 +1131,61 @@ export function AppExperience() {
   const role = session?.role || "student";
   const isStudent = role === "student";
   const isDemoSession = session?.source === "demo";
-  const visibleNavItems = isStudent ? STUDENT_NAV_ITEMS : STAFF_NAV_ITEMS;
+  const isPublicDemoSession = publicDemoRole === "student" || publicDemoRole === "teacher";
+  const staffNavItems = useMemo(
+    () => isPublicDemoSession
+      ? STAFF_NAV_ITEMS.filter(([view]) => !PUBLIC_DEMO_HIDDEN_STAFF_VIEWS.has(view))
+      : STAFF_NAV_ITEMS,
+    [isPublicDemoSession],
+  );
+  const staffViewIds = useMemo(() => staffNavItems.map(([view]) => view), [staffNavItems]);
+  const visibleNavItems = isStudent ? STUDENT_NAV_ITEMS : staffNavItems;
   const currentView = isStudent
     ? "diary"
     : (staffViewIds.includes(activeView) ? activeView : "school");
   const shouldTrackAccess = sessionChecked && session?.source === "supabase";
 
   const dailyLimit = hasPracticePass ? LIMITS.practiceDailyUses : LIMITS.freeDailyUses;
-  const remaining = isDemoSession ? Math.max(0, dailyLimit + usage.bonus - usage.used) : Infinity;
+  const remaining = isDemoSession && !isPublicDemoSession ? Math.max(0, dailyLimit + usage.bonus - usage.used) : Infinity;
   const total = dailyLimit + usage.bonus;
-  const usageWidth = isDemoSession && total !== 0 ? (remaining / total) * 100 : 100;
+  const usageWidth = isDemoSession && !isPublicDemoSession && total !== 0 ? (remaining / total) * 100 : 100;
   const staffMetrics = schoolSummary?.metrics || {};
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadInitialState() {
-      let nextSession = readStoredSession();
-      try {
-        const response = await fetch("/api/auth", { cache: "no-store" });
-        if (response.ok) {
-          const auth = await response.json();
-          if (auth.session) {
-            nextSession = auth.session;
-            clearAppLocalStorage();
-          } else if (auth.configured) {
-            nextSession = null;
-            clearAppLocalStorage();
+      let nextSession = isPublicDemoSession ? buildPublicDemoSession(publicDemoRole) : readStoredSession();
+      if (!isPublicDemoSession) {
+        try {
+          const response = await fetch("/api/auth", { cache: "no-store" });
+          if (response.ok) {
+            const auth = await response.json();
+            if (auth.session) {
+              nextSession = auth.session;
+              clearAppLocalStorage();
+            } else if (auth.configured) {
+              nextSession = null;
+              clearAppLocalStorage();
+            }
           }
+        } catch (error) {
+          console.warn("Auth session restore skipped:", error.message);
         }
-      } catch (error) {
-        console.warn("Auth session restore skipped:", error.message);
       }
 
       if (!cancelled) {
         setSession(nextSession);
         if (nextSession?.source === "demo") {
+          if (isPublicDemoSession) {
+            setStatus("公開デモ用の架空セッションです。実名や実習先名は入れず、架空の場面で試してください。");
+            setUsage({ used: 0, bonus: 0 });
+            setHasPracticePass(false);
+            setFeedbackCount(0);
+            setGenerationCount(0);
+            setSessionChecked(true);
+            return;
+          }
           try {
             const savedUsage = JSON.parse(localStorage.getItem(usageKey));
             setUsage({ used: 0, bonus: 0, ...savedUsage });
@@ -1054,7 +1212,7 @@ export function AppExperience() {
     return () => {
       cancelled = true;
     };
-  }, [feedbackKey, generationLogKey, passKey, usageKey]);
+  }, [feedbackKey, generationLogKey, isPublicDemoSession, passKey, publicDemoRole, usageKey]);
 
   useEffect(() => {
     if (!sessionChecked || !isStudent) return;
@@ -1096,6 +1254,11 @@ export function AppExperience() {
     let cancelled = false;
 
     async function loadSchoolSummary() {
+      if (isPublicDemoSession) {
+        setSchoolSummary({ configured: false });
+        setSchoolSummaryStatus("公開デモ用の架空データを表示しています。");
+        return;
+      }
       setSchoolSummaryStatus("学校データを読み込んでいます。");
       try {
         const response = await fetch("/api/school/summary", { cache: "no-store" });
@@ -1125,7 +1288,7 @@ export function AppExperience() {
     return () => {
       cancelled = true;
     };
-  }, [currentView, isStudent, session?.source, sessionChecked]);
+  }, [currentView, isPublicDemoSession, isStudent, session?.source, sessionChecked]);
 
   function getSessionContext() {
     return {
@@ -1169,6 +1332,10 @@ export function AppExperience() {
   }
 
   function saveGenerationLog(record) {
+    if (isPublicDemoSession) {
+      setGenerationCount((current) => current + 1);
+      return;
+    }
     if (isDemoSession) {
       const saved = getSavedFeedbackRecords(generationLogKey);
       const nextRecords = [sanitizeGenerationLogForExport(record), ...saved].slice(0, 100);
@@ -1178,7 +1345,7 @@ export function AppExperience() {
     } else {
       setGenerationCount((current) => current + 1);
     }
-    if (!record.serverPersisted) {
+    if (!record.serverPersisted && !isDemoSession) {
       persistServerLog("generation", record);
     }
   }
@@ -1202,7 +1369,7 @@ export function AppExperience() {
 
   function saveUsage(nextUsage) {
     setUsage(nextUsage);
-    if (isDemoSession) {
+    if (isDemoSession && !isPublicDemoSession) {
       safeSetLocalStorage(usageKey, JSON.stringify(nextUsage));
     }
   }
@@ -1260,6 +1427,9 @@ export function AppExperience() {
   }
 
   async function generate(kind, payload, options = {}) {
+    if (isPublicDemoSession) {
+      return buildClientDemoGeneration(payload);
+    }
     const subscription = options.subscription || (hasPracticePass ? "practice" : "free");
     const response = await fetch("/api/generate", {
       method: "POST",
@@ -1289,7 +1459,7 @@ export function AppExperience() {
 
   async function handleDiarySubmit(event) {
     event.preventDefault();
-    if (isDemoSession && remaining <= 0) {
+    if (isDemoSession && !isPublicDemoSession && remaining <= 0) {
       setStatus("学生画面の利用枠を使い切りました。必要に応じて利用枠を追加できます。");
       return;
     }
@@ -1327,7 +1497,7 @@ export function AppExperience() {
       setStatus("先に入力内容を見直してください。安全化だけでは扱えない表現が残っています。");
       return;
     }
-    if (isDemoSession && remaining <= 0) {
+    if (isDemoSession && !isPublicDemoSession && remaining <= 0) {
       setStatus("学生画面の利用枠を使い切りました。必要に応じて利用枠を追加できます。");
       return;
     }
@@ -1376,6 +1546,9 @@ export function AppExperience() {
   }
 
   async function privacyCheckRequest(kind, payload, phase) {
+    if (isPublicDemoSession) {
+      return buildClientPrivacyReview(kind, payload, phase);
+    }
     const response = await fetch("/api/privacy-check", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1461,19 +1634,26 @@ export function AppExperience() {
     setStatus("ログアウトしています。");
     try {
       clearAppLocalStorage();
-      const response = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        cache: "no-store",
-        body: JSON.stringify({ action: "signOut" }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error || "ログアウトに失敗しました。");
+      let redirectHref = "/login";
+      if (isPublicDemoSession) {
+        setSession(null);
+        setSchoolSummary(null);
+        redirectHref = normalizePublicDemoReturnHref(publicDemoReturnHref);
+      } else {
+        const response = await fetch("/api/auth", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          body: JSON.stringify({ action: "signOut" }),
+        });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error || "ログアウトに失敗しました。");
+        }
+        setSession(null);
+        setSchoolSummary(null);
       }
-      setSession(null);
-      setSchoolSummary(null);
-      window.location.replace("/login");
+      window.location.replace(redirectHref);
     } catch (error) {
       setStatus(`${error.message} もう一度ログアウトを押してください。`);
       setLogoutBusy(false);
@@ -2200,29 +2380,29 @@ function StudentInputStep({
           <div className="optional-input-grid">
             <label>
               日付
-              <input type="date" value={diary.date} onChange={(event) => onChange("date", event.target.value)} />
+              <input aria-label="日付" type="date" value={diary.date} onChange={(event) => onChange("date", event.target.value)} />
             </label>
             <label>
               天気
-              <select value={diary.weather} onChange={(event) => onChange("weather", event.target.value)}>
+              <select aria-label="天気" value={diary.weather} onChange={(event) => onChange("weather", event.target.value)}>
                 {["晴れ", "くもり", "雨", "雪"].map((weather) => <option key={weather}>{weather}</option>)}
               </select>
             </label>
             <label>
               クラス・年齢
-              <select value={diary.age} onChange={(event) => onChange("age", event.target.value)}>
+              <select aria-label="クラス・年齢" value={diary.age} onChange={(event) => onChange("age", event.target.value)}>
                 {["0歳児クラス", "1歳児クラス", "2歳児クラス", "3歳児クラス", "4歳児クラス", "5歳児クラス", "異年齢保育"].map((age) => <option key={age}>{age}</option>)}
               </select>
             </label>
             <label>
               場面
-              <select value={diary.scene} onChange={(event) => onChange("scene", event.target.value)}>
+              <select aria-label="場面" value={diary.scene} onChange={(event) => onChange("scene", event.target.value)}>
                 {["朝の自由遊び", "戸外遊び", "製作活動", "食事", "午睡", "帰りの会", "部分実習"].map((scene) => <option key={scene}>{scene}</option>)}
               </select>
             </label>
             <label className="wide">
               今日のねらい
-              <input value={diary.goal} placeholder="例：子ども同士の関わりを観察し、保育者の援助を学ぶ" onChange={(event) => onChange("goal", event.target.value)} />
+              <input aria-label="今日のねらい" value={diary.goal} placeholder="例：子ども同士の関わりを観察し、保育者の援助を学ぶ" onChange={(event) => onChange("goal", event.target.value)} />
             </label>
           </div>
         </details>
@@ -2676,14 +2856,14 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
 
         <section className="school-panel demo-flow-panel">
           <div>
-            <span className="label">事前レビュー</span>
-            <h3>教員レビューの確認順</h3>
+            <span className="label">授業運用</span>
+            <h3>教員画面で見る順番</h3>
           </div>
           <div className="school-step-list">
-            <span>1. 学生画面で安全な架空入力例を試す</span>
-            <span>2. 安全な表現、問い返し、提出前チェックまで見る</span>
-            <span>3. 教員画面で当日確認・授業共有・学生本人の分類を見る</span>
-            <span>4. 学校フォーマットと保存範囲を確認フォームへ返す</span>
+            <span>1. 学生が提出前に見直した記録候補を確認する</span>
+            <span>2. 当日見る候補と授業で扱う候補を分ける</span>
+            <span>3. 学生本人へ戻す問い・確認点を選ぶ</span>
+            <span>4. 学校フォーマットと保存範囲に合わせて運用を調整する</span>
           </div>
         </section>
 
@@ -2811,14 +2991,14 @@ function PocDecisionPanel() {
   );
 }
 
-function TeacherPreviewPanel({ title = "教員に確認していただきたいこと", items = teacherPreviewCheckpoints }) {
+function TeacherPreviewPanel({ title = "教員が確認する観点", items = teacherPreviewCheckpoints }) {
   const safeItems = safeRecordList(items);
   return (
     <section className="school-panel teacher-preview-panel">
       <div>
-        <span className="label">事前レビュー</span>
+        <span className="label">運用確認</span>
         <h3>{title}</h3>
-        <p className="teacher-preview-lead">機能数ではなく、学生が使えるか、教員負担が増えないか、学校フォーマットに合うかで確認します。</p>
+        <p className="teacher-preview-lead">機能数ではなく、学生の省察に役立つか、教員負担が増えないか、学校フォーマットに合うかで確認します。</p>
       </div>
       <div className="teacher-preview-grid">
         {safeItems.map((item) => (
@@ -2829,7 +3009,7 @@ function TeacherPreviewPanel({ title = "教員に確認していただきたい�
           </article>
         ))}
       </div>
-      <div className="school-step-list" aria-label="確認フォームで返す観点">
+      <div className="school-step-list" aria-label="教員が見る観点">
         {teacherPreviewReturnItems.map((item, index) => (
           <span key={item}>{index + 1}. {item}</span>
         ))}

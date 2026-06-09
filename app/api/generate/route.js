@@ -57,6 +57,16 @@ export const runtime = "nodejs";
 
 export async function POST(request) {
   try {
+    if (isPublicDemoOnly()) {
+      return jsonNoStore(
+        {
+          code: "public_demo_api_disabled",
+          error: "公開デモでは、このAPIを使用しません。",
+        },
+        { status: 403 },
+      );
+    }
+
     const runtimeConfigError = validateGenerateRuntimeConfig();
     if (runtimeConfigError) return runtimeConfigError;
 
@@ -328,6 +338,10 @@ function normalizeBedrockGuardrailErrorReason(error) {
   if (error?.name === "TimeoutError" || error?.name === "AbortError") return "timeout";
   if (/config missing/i.test(String(error?.message || ""))) return "missing_config";
   return "request_failed";
+}
+
+function isPublicDemoOnly() {
+  return process.env["MANABI_PUBLIC_DEMO_ONLY"] === "true";
 }
 
 async function readLimitedJson(request, maxBytes) {

@@ -7,6 +7,8 @@ import { readLimitedJsonBody } from "../../_jsonRequest.js";
 export const runtime = "nodejs";
 
 export async function GET(request) {
+  if (isPublicDemoOnly()) return publicDemoApiDisabledResponse();
+
   const sameOriginResponse = enforceSameOriginRequest(request);
   if (sameOriginResponse) return sameOriginResponse;
 
@@ -56,6 +58,8 @@ export async function GET(request) {
 }
 
 export async function PUT(request) {
+  if (isPublicDemoOnly()) return publicDemoApiDisabledResponse();
+
   const sameOriginResponse = enforceSameOriginRequest(request);
   if (sameOriginResponse) return sameOriginResponse;
 
@@ -122,6 +126,25 @@ async function requireStaffContext(request) {
     return Response.json({ error: "学校プロフィールが未設定です。" }, { status: 403 });
   }
   return context;
+}
+
+function isPublicDemoOnly() {
+  return process.env["MANABI_PUBLIC_DEMO_ONLY"] === "true";
+}
+
+function publicDemoApiDisabledResponse() {
+  return Response.json(
+    {
+      code: "public_demo_api_disabled",
+      error: "公開デモでは、このAPIを使用しません。",
+    },
+    {
+      status: 403,
+      headers: {
+        "cache-control": "no-store",
+      },
+    },
+  );
 }
 
 async function readLimitedJson(request, maxBytes) {
