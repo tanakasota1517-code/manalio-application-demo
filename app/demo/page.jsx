@@ -1,8 +1,8 @@
 import { PublicFooter, PublicHeader } from "../site-components";
 
 export const metadata = {
-  title: "体験ページ | Manalio",
-  description: "Manalioの学生入力、記録前の気づき、問い返し、翌日の観察、教員向け整理の流れを、安全な架空例だけで確認できる閲覧ページです。",
+  title: "BootCamp公開デモ | Manalio",
+  description: "Manalioの課題意識、公開プロトタイプの動く範囲、安全境界を、架空例だけで確認できるBootCamp向け閲覧ページです。",
   alternates: {
     canonical: "/demo",
   },
@@ -12,10 +12,29 @@ export const metadata = {
   },
 };
 
+const bootcampSignals = [
+  {
+    title: "解きたい課題",
+    body: "保育実習の記録は、提出物で終わらせず、観察・省察・実習先の助言を次の日の学びへ戻す必要があります。",
+  },
+  {
+    title: "動くプロトタイプ",
+    body: "学生入力、記録前の安全確認、問い返し、翌日の観察観点、教員の確認材料までを架空例で確認できます。",
+  },
+  {
+    title: "安全境界",
+    body: "実データ、外部AI送信、学校データ保存、限定レビュー環境やアカウント情報はこの公開デモに含めません。",
+  },
+  {
+    title: "継続開発",
+    body: "学校ごとの日誌フォーマット、保存範囲、教員画面に出す情報を小さく検証しながら、MVPを更新していきます。",
+  },
+];
+
 const flowSteps = [
   {
     label: "01",
-    title: "学生が先に書く",
+    title: "観察を記録する",
     body: "見たこと、自分で考えたこと、明日見たいこと、実習先で受けた助言を分けて入力します。",
   },
   {
@@ -35,8 +54,8 @@ const flowSteps = [
   },
   {
     label: "05",
-    title: "教員が面談に使う",
-    body: "当日確認、授業共有、学生本人の自己確認に分け、全件添削ではなく面談材料として扱います。",
+    title: "教員が確認する",
+    body: "当日確認、授業共有、学生本人の自己確認に分け、全件添削や評価ではなく指導材料として扱います。",
   },
 ];
 
@@ -59,27 +78,27 @@ const safetyItems = [
 ];
 
 const demoAssurances = [
-  "ログイン情報なしで、全体の思想だけを確認できます。",
+  "BootCamp・外部応募向けに切り出した閲覧専用デモです。",
   "実データ入力、外部AI送信、学校データ保存は行いません。",
-  "応募・事前相談では、限定レビュー環境のURLやアカウントを使いません。",
+  "限定レビュー環境やアカウント情報は含めていません。",
 ];
 
 const reviewerHighlights = [
   {
-    title: "学生が先に書く",
-    body: "AIが文章を完成させる前提ではなく、学生の観察と言葉を出発点にします。",
+    title: "代筆ではない",
+    body: "AIが日誌を完成させる画面ではなく、学生が書いた観察をもとに考え直すための支援です。",
   },
   {
-    title: "記録前に気づく",
-    body: "個人が分かる表現や扱いに注意が必要な表現を、提出前に見直せる形で示します。",
+    title: "安全に気づく",
+    body: "個人が分かる表現や扱いに注意が必要な表現を、学生が提出前に見直せる形で示します。",
   },
   {
-    title: "翌日の観察に戻す",
+    title: "翌日の観察に戻る",
     body: "実習先で受けた助言を、次の日に何を見るか、どう関わるかへつなげます。",
   },
   {
-    title: "教員は支援に使う",
-    body: "全件添削や成績判定ではなく、学生との面談・授業で扱う候補を整理します。",
+    title: "教員は判断材料にする",
+    body: "全件添削や成績判定ではなく、学生への指導や授業で扱う候補を整理します。",
   },
 ];
 
@@ -87,25 +106,6 @@ const teacherItems = [
   "当日確認: 個別に早めに見たい候補",
   "授業共有: クラス全体で扱いやすい傾向",
   "学生本人: 提出前の自己確認として返せる項目",
-  "次回相談: 学校フォーマット、保存範囲、費用感",
-];
-
-const consultationItems = [
-  {
-    label: "学校フォーマット",
-    title: "どの見出しに合わせるか",
-    body: "実習日誌の欄、自己確認観点、教員が見たい見出しを、学校の様式に合わせます。",
-  },
-  {
-    label: "保存範囲",
-    title: "何を残し、何を残さないか",
-    body: "学生の本文を広く保存するのではなく、教員が確認する段階と範囲を相談します。",
-  },
-  {
-    label: "小さな試用",
-    title: "どの場面から試すか",
-    body: "対象人数、期間、費用感、教員側の確認負担を合わせて、無理のないPoC範囲を決めます。",
-  },
 ];
 
 export default function DemoPage() {
@@ -116,11 +116,11 @@ export default function DemoPage() {
 
         <section className="detail-hero demo-hero">
           <div className="demo-hero-copy">
-            <span className="site-kicker">安全な架空例で見る</span>
-            <h1>学生が書き、気づき、翌日の観察へ戻る流れ。</h1>
+            <span className="site-kicker">BootCamp向け公開プロトタイプ</span>
+            <h1>観察を記録に。記録を学びに。</h1>
             <p>
-              Manalioは、実習日誌を代わりに完成させる画面ではありません。
-              学生が自分で書いた記録をもとに、記録前の気づき、問い返し、教員が支援すべき点の整理へつなげる流れを確認できます。
+              Manalioは、保育者養成校向けのAI実習支援MVPです。
+              学生が自分で書いた観察、考え、実習先で受けた助言をもとに、記録前の安全確認、問い返し、翌日の観察観点、教員の確認材料へつなげる流れを架空例で確認できます。
             </p>
             <div className="demo-assurance-list" aria-label="この体験ページの前提">
               {demoAssurances.map((item) => (
@@ -137,15 +137,34 @@ export default function DemoPage() {
               <span>学生入力</span>
               <span>記録前の気づき</span>
               <span>問い返し</span>
-              <span>教員支援</span>
+              <span>教員確認</span>
             </div>
+          </div>
+        </section>
+
+        <section className="detail-section demo-review-strip" aria-labelledby="demo-bootcamp-heading">
+          <div className="detail-section-head">
+            <span className="site-kicker">BootCampで見てほしいこと</span>
+            <h2 id="demo-bootcamp-heading">アイデアではなく、動く範囲と安全境界を見せる</h2>
+            <p>
+              このページは学校営業用のLPではなく、応募・外部共有用に切り出した公開プロトタイプです。
+              Manalioが何の課題に向き合い、どこまで動き、何を外へ出さない設計にしているかを確認できます。
+            </p>
+          </div>
+          <div className="demo-review-grid">
+            {bootcampSignals.map((item) => (
+              <article key={item.title}>
+                <strong>{item.title}</strong>
+                <p>{item.body}</p>
+              </article>
+            ))}
           </div>
         </section>
 
         <section className="detail-section demo-review-strip" aria-labelledby="demo-review-heading">
           <div className="detail-section-head">
-            <span className="site-kicker">まず見てほしいところ</span>
-            <h2 id="demo-review-heading">Manalioの価値が伝わる4つの視点</h2>
+            <span className="site-kicker">プロダクトの核</span>
+            <h2 id="demo-review-heading">Manalioがすること、しないこと</h2>
           </div>
           <div className="demo-review-grid">
             {reviewerHighlights.map((item) => (
@@ -160,7 +179,7 @@ export default function DemoPage() {
         <section className="detail-section">
           <div className="detail-section-head">
             <span className="site-kicker">全体の流れ</span>
-            <h2>最初に見てほしい5つの場面</h2>
+            <h2>公開デモで確認できる5つの場面</h2>
           </div>
           <div className="demo-flow-grid">
             {flowSteps.map((step) => (
@@ -210,10 +229,10 @@ export default function DemoPage() {
         <section className="detail-section detail-split reverse">
           <div>
             <span className="site-kicker">教員画面</span>
-            <h2>全件添削ではなく、面談で扱う候補を分ける</h2>
+            <h2>全件添削ではなく、指導で扱う候補を分ける</h2>
             <p>
               教員画面は学生の成績を判定する場所ではありません。
-              学生がどこでつまずき、どの指導を翌日に活かそうとしているかを、必要な範囲に絞って確認する画面です。
+              学生がどこでつまずき、どの指導を翌日に活かそうとしているかを、必要な範囲に絞って確認するための画面です。
             </p>
           </div>
           <div className="detail-list">
@@ -223,27 +242,11 @@ export default function DemoPage() {
           </div>
         </section>
 
-        <section className="detail-section">
-          <div className="detail-section-head">
-            <span className="site-kicker">PoC前に確認すること</span>
-            <h2>画面を見たあと、次回はこの3点を相談します</h2>
-          </div>
-          <div className="detail-card-grid pricing">
-            {consultationItems.map((item) => (
-              <article key={item.title}>
-                <span>{item.label}</span>
-                <strong>{item.title}</strong>
-                <p>{item.body}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
         <section className="detail-cta demo-cta">
           <div>
-            <span className="site-kicker">次に相談したいこと</span>
-            <h2>PoC前に、学校フォーマットと保存範囲を一緒に確認します。</h2>
-            <p>このページは安全な架空例だけで流れを見るための入口です。実データ入力、外部AI送信、学校データ保存は行いません。</p>
+            <span className="site-kicker">公開範囲</span>
+            <h2>このページは、応募・外部共有用に切り出した安全なデモです。</h2>
+            <p>実データ入力、外部AI送信、学校データ保存は行いません。公開GitHubも、現在の作業リポジトリをそのまま出さず、安全な候補フォルダだけを切り出して扱います。</p>
           </div>
           <a className="site-primary" href="/product">機能を見る</a>
         </section>

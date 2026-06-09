@@ -3,7 +3,7 @@ export function PublicHeader() {
     <header className="site-header">
       <a className="site-brand" href="/">
         <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
-        <span className="site-brand-caption">実習指導支援AIプラットフォーム</span>
+        <span className="site-brand-caption">保育実習の省察支援</span>
       </a>
       <nav className="site-nav" aria-label="公開サイト">
         <a href="/">Manalioとは</a>
@@ -33,7 +33,7 @@ export function PublicFooter() {
     <footer className="site-footer" aria-label="サイト情報">
       <a className="site-brand" href="/">
         <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
-        <span className="site-brand-caption">実習指導支援AIプラットフォーム</span>
+        <span className="site-brand-caption">保育実習の省察支援</span>
       </a>
       <nav aria-label="サイト内リンク">
         <a href="/evidence">信頼性検証</a>

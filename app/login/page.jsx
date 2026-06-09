@@ -55,6 +55,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [authConfigured, setAuthConfigured] = useState(null);
   const [publicSignup, setPublicSignup] = useState(false);
+  const [demoLoginAllowed, setDemoLoginAllowed] = useState(false);
   const [mode, setMode] = useState("signIn");
   const [schoolName, setSchoolName] = useState("さくら保育者養成校");
   const [className, setClassName] = useState("保育実習I / 2年A組");
@@ -75,6 +76,7 @@ export default function LoginPage() {
         if (cancelled) return;
         setAuthConfigured(Boolean(body.configured));
         setPublicSignup(Boolean(body.publicSignup));
+        setDemoLoginAllowed(!body.configured && SHOW_DEMO_SHORTCUTS);
         if (body.configured && !body.publicSignup) {
           setMode("signIn");
         }
@@ -87,6 +89,7 @@ export default function LoginPage() {
       } catch {
         if (!cancelled) {
           setAuthConfigured(false);
+          setDemoLoginAllowed(false);
           setStatus("ログイン状態を確認できませんでした。管理者にお問い合わせください。");
         }
       }
@@ -124,7 +127,11 @@ export default function LoginPage() {
     event.preventDefault();
 
     if (!authConfigured) {
-      loginAs(role);
+      if (demoLoginAllowed) {
+        loginAs(role);
+      } else {
+        setStatus("ログイン環境を確認できないため、デモセッションでは開けません。学校アカウントの設定を確認してください。");
+      }
       return;
     }
 
@@ -167,7 +174,7 @@ export default function LoginPage() {
     }
   }
 
-  const showSetupFields = !authConfigured || (publicSignup && mode === "signUp");
+  const showSetupFields = demoLoginAllowed || (publicSignup && mode === "signUp");
 
   return (
     <main id="main-content" className="login-shell">
@@ -179,7 +186,7 @@ export default function LoginPage() {
         <div className="login-copy">
           <span className="lp-eyebrow">学校アカウント</span>
           <h1>学校アカウントでログイン</h1>
-          <p>{authConfigured ? "学校から案内されたメールアドレスとパスワードでログインしてください。" : "学校・役割を選んでサービス画面に入れます。"}</p>
+          <p>{authConfigured ? "学校から案内されたメールアドレスとパスワードでログインしてください。" : demoLoginAllowed ? "学校・役割を選んでサービス画面に入れます。" : "学校アカウントの設定を確認しています。"}</p>
         </div>
 
         {authConfigured && publicSignup && (
@@ -235,7 +242,7 @@ export default function LoginPage() {
               <input type="password" value={password} autoComplete={mode === "signUp" ? "new-password" : "current-password"} placeholder="8文字以上" onChange={(event) => setPassword(event.target.value)} />
             </label>
           )}
-          <button className="primary-button" type="submit" disabled={busy || authConfigured === null}>
+          <button className="primary-button" type="submit" disabled={busy || authConfigured === null || (!authConfigured && !demoLoginAllowed)}>
             {busy ? "処理中..." : authConfigured ? mode === "signUp" ? "アカウント作成" : "ログイン" : "サービス画面を開く"}
           </button>
         </form>

@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
+
 const buckets = globalThis.__manabiRateLimitBuckets || new Map();
 globalThis.__manabiRateLimitBuckets = buckets;
 
+const MAX_BUCKETS = 5000;
 let requestsSincePrune = 0;
 
 export function enforceRateLimit(request, options = {}) {
@@ -51,15 +54,36 @@ function pruneExpiredBuckets(now) {
   for (const [key, bucket] of buckets.entries()) {
     if (bucket.resetAt <= now) buckets.delete(key);
   }
+  pruneOverflowBuckets();
+}
+
+function pruneOverflowBuckets() {
+  if (buckets.size <= MAX_BUCKETS) return;
+  const overflow = buckets.size - MAX_BUCKETS;
+  const oldestKeys = [...buckets.entries()]
+    .sort(([, left], [, right]) => left.resetAt - right.resetAt)
+    .slice(0, overflow)
+    .map(([key]) => key);
+  for (const key of oldestKeys) {
+    buckets.delete(key);
+  }
 }
 
 function getClientIdentifier(request) {
   const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return (
+  const rawIdentifier = (
     forwardedFor ||
     request.headers.get("x-real-ip") ||
     request.headers.get("cf-connecting-ip") ||
     request.headers.get("fly-client-ip") ||
     "local"
   );
+  return normalizeClientIdentifier(rawIdentifier);
+}
+
+function normalizeClientIdentifier(value) {
+  const normalized = String(value || "").replace(/[\r\n\t ]+/g, " ").trim();
+  if (!normalized || normalized === "local") return "local";
+  const bounded = normalized.slice(0, 512);
+  return createHash("sha256").update(bounded).digest("hex").slice(0, 32);
 }

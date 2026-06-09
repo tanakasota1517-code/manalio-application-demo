@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createContactLabelPattern,
   createFamilyInfoPattern,
@@ -18,6 +18,8 @@ const LIMITS = {
   adBonusLimit: 3,
 };
 const ENABLE_LOG_EXPORTS = process.env.NEXT_PUBLIC_MANABI_ENABLE_LOG_EXPORTS === "true";
+const ALLOW_STORED_DEMO_SESSION = process.env.NEXT_PUBLIC_MANABI_SHOW_DEMO_SHORTCUTS === "true";
+const ACCESS_LOG_SURFACE = "teacher_preview";
 
 const initialDiary = {
   date: "",
@@ -58,7 +60,7 @@ const defaultSchoolFormat = {
   diaryHeadings: ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "教員への相談"],
   planHeadings: ["活動概要", "ねらい", "環境構成", "展開と援助", "相談ポイント"],
   checkRules: ["個人名の置換・マスキング", "断定表現の確認", "未入力項目の明示", "保育所保育指針の観点", "学校の担当教員への相談点"],
-  writingStyle: "学生が先に書いた記録に対して、完成文ではなく問い返し・安全確認・相談点として返す。",
+  writingStyle: "学生が自分で書いた記録に対して、完成文ではなく問い返し・安全確認・相談点として返す。",
 };
 
 const STUDENT_NAV_ITEMS = [
@@ -90,7 +92,7 @@ const CLIENT_FIELD_LABELS = {
 };
 
 const STAFF_NAV_ITEMS = [
-  ["school", "面談準備"],
+  ["school", "確認ダッシュボード"],
   ["assignments", "実習前後の課題"],
   ["students", "学生一覧"],
   ["review", "確認レビュー"],
@@ -274,6 +276,24 @@ const reviewRouteFilters = [
   { value: "低", label: "学生本人", detail: "自己確認へ" },
 ];
 
+const reviewRouteGuide = [
+  {
+    label: "当日確認",
+    action: "今日、教員が見る",
+    detail: "個人情報・要配慮情報・強い断定など、早めに止めたい候補。",
+  },
+  {
+    label: "授業共有",
+    action: "授業でまとめて扱う",
+    detail: "複数の学生に共通しそうな観察・表現のつまずき。",
+  },
+  {
+    label: "学生本人",
+    action: "提出前の自己確認へ戻す",
+    detail: "入力不足や見直しで整えられる候補。教員の全件添削にしない。",
+  },
+];
+
 const demoRecentLogs = [
   {
     id: "demo-log-1",
@@ -393,9 +413,32 @@ const teacherPreviewCheckpoints = [
 ];
 
 const teacherPreviewReturnItems = [
-  "PoC前に最低限直す点",
+  "利用前に最低限直す点",
   "教員画面に出ると役立つ情報・出ない方がよい情報",
   "学校フォーマットに合わせるために必要な見出し",
+];
+
+const pocDecisionItems = [
+  {
+    label: "対象と期間",
+    title: "どの授業・実習期間で使うか",
+    detail: "最初から全体展開せず、授業内確認や一部クラスでの利用から始めます。",
+  },
+  {
+    label: "入力範囲",
+    title: "観察メモ・助言要約・翌日の観察に絞る",
+    detail: "指導案や評価ではなく、実習中に学生が自分で書いた記録と、実習先で受けた助言の扱いを見ます。",
+  },
+  {
+    label: "保存範囲",
+    title: "保存してよい情報を学校と決める",
+    detail: "安全確認後の本文、要約、分類、メタ情報のどこまで残すかを、学校の運用範囲に合わせます。",
+  },
+  {
+    label: "運用範囲",
+    title: "人数・期間・支援範囲とセットで考える",
+    detail: "対象人数、利用期間、学校側の確認負担と合わせて、無理のない使い方に絞ります。",
+  },
 ];
 
 const formatReviewQuestions = [
@@ -891,6 +934,10 @@ function buildFeedbackNextSteps(feedback = {}) {
 }
 
 function readStoredSession() {
+  if (!ALLOW_STORED_DEMO_SESSION) {
+    clearAppLocalStorage();
+    return null;
+  }
   try {
     const demoSession = normalizeStoredDemoSession(JSON.parse(localStorage.getItem("manabi-demo-session") || "null"));
     if (demoSession) return demoSession;
@@ -939,6 +986,8 @@ export function AppExperience() {
   const [busy, setBusy] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const trackedAppOpenRef = useRef(false);
+  const lastTrackedViewRef = useRef("");
 
   const role = session?.role || "student";
   const isStudent = role === "student";
@@ -947,6 +996,7 @@ export function AppExperience() {
   const currentView = isStudent
     ? "diary"
     : (staffViewIds.includes(activeView) ? activeView : "school");
+  const shouldTrackAccess = sessionChecked && session?.source === "supabase";
 
   const dailyLimit = hasPracticePass ? LIMITS.practiceDailyUses : LIMITS.freeDailyUses;
   const remaining = isDemoSession ? Math.max(0, dailyLimit + usage.bonus - usage.used) : Infinity;
@@ -1021,6 +1071,27 @@ export function AppExperience() {
   }, [activeView, isStudent, sessionChecked, staffViewIds]);
 
   useEffect(() => {
+    if (!shouldTrackAccess || trackedAppOpenRef.current) return;
+    trackedAppOpenRef.current = true;
+    trackAccessEvent("app_open", {
+      view: currentView,
+      flowStep: isStudent ? studentFlowStep : "",
+      status: "completed",
+    });
+  }, [currentView, isStudent, shouldTrackAccess, studentFlowStep]);
+
+  useEffect(() => {
+    if (!shouldTrackAccess) return;
+    const key = `${role}:${currentView}:${isStudent ? studentFlowStep : ""}`;
+    if (lastTrackedViewRef.current === key) return;
+    lastTrackedViewRef.current = key;
+    trackAccessEvent("view_open", {
+      view: currentView,
+      flowStep: isStudent ? studentFlowStep : "",
+    });
+  }, [currentView, isStudent, role, shouldTrackAccess, studentFlowStep]);
+
+  useEffect(() => {
     if (!sessionChecked || isStudent || !["school", "assignments", "students", "review", "formats"].includes(currentView)) return;
     let cancelled = false;
 
@@ -1036,7 +1107,7 @@ export function AppExperience() {
           setSchoolSummary(body);
           setSchoolSummaryStatus(
             body.configured
-              ? "面談準備用の確認記録を表示しています。"
+              ? "教員確認用の記録を表示しています。"
               : session?.source === "demo"
                 ? "参考データを表示しています。"
                 : "学校データの接続を確認しています。",
@@ -1071,6 +1142,30 @@ export function AppExperience() {
       email: session?.email || "",
       source: session?.source || "",
     };
+  }
+
+  async function trackAccessEvent(event, metadata = {}) {
+    if (!sessionChecked || session?.source !== "supabase") return;
+    try {
+      await fetch("/api/demo/access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        cache: "no-store",
+        keepalive: true,
+        body: JSON.stringify({
+          event,
+          metadata: {
+            surface: ACCESS_LOG_SURFACE,
+            view: metadata.view || currentView,
+            flowStep: metadata.flowStep || (isStudent ? studentFlowStep : ""),
+            sampleId: metadata.sampleId || "",
+            status: metadata.status || "",
+          },
+        }),
+      });
+    } catch (error) {
+      console.warn("Access tracking skipped:", error.message);
+    }
   }
 
   function saveGenerationLog(record) {
@@ -1158,6 +1253,10 @@ export function AppExperience() {
     setFinalDraft("");
     setFinalCheck(null);
     setStatus(`場面例「${sample.title}」と実習先フィードバック例を読み込みました。`);
+    trackAccessEvent("student_sample_loaded", {
+      flowStep: "input",
+      sampleId: sample.id,
+    });
   }
 
   async function generate(kind, payload, options = {}) {
@@ -1211,6 +1310,10 @@ export function AppExperience() {
       setFinalCheck(null);
       setStudentFlowStep("confirm");
       setStatus(review.summary || "安全確認を表示しました。内容を確認してから問い返しへ進めます。");
+      trackAccessEvent("student_safety_checked", {
+        flowStep: "confirm",
+        status: review.blocked ? "blocked" : review.status || "review",
+      });
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -1261,6 +1364,10 @@ export function AppExperience() {
       setFinalDraft("");
       setFinalCheck(null);
       setStatus("問い返しと提出前の自己確認を表示しました。最後に自分の言葉で記録を整えてください。");
+      trackAccessEvent("student_question_generated", {
+        flowStep: "revise",
+        status: "completed",
+      });
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -1304,6 +1411,10 @@ export function AppExperience() {
       setFinalCheck(review);
       setStudentFlowStep("final");
       setStatus(review.summary || "提出前チェックを表示しました。");
+      trackAccessEvent("student_final_checked", {
+        flowStep: "final",
+        status: review.blocked ? "blocked" : review.status || "review",
+      });
     } catch (error) {
       setStatus(error.message);
     } finally {
@@ -1393,6 +1504,7 @@ export function AppExperience() {
     const checkedText = normalizeMultiline(finalDraft);
     const sanitizedText = normalizeMultiline(finalCheck?.payload?.memo || "");
     const canCopyCheckedFinal = Boolean(finalCheck)
+      && finalCheck.status === "clear"
       && !finalCheck.blocked
       && (!finalCheck.changed || checkedText === sanitizedText);
     if (!canCopyCheckedFinal) {
@@ -1401,6 +1513,8 @@ export function AppExperience() {
         setStatus("記録をコピーする前に、提出前チェックを行ってください。");
       } else if (finalCheck.blocked) {
         setStatus("記録に扱えない表現が残っています。入力を見直してから再チェックしてください。");
+      } else if (finalCheck.status === "review") {
+        setStatus("記録前に見直したい内容があります。入力を整えてから再チェックしてください。");
       } else {
         setStatus("安全化した文を反映してからコピーしてください。");
       }
@@ -1410,6 +1524,10 @@ export function AppExperience() {
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
     setStatus("記録をコピーしました。");
+    trackAccessEvent("student_final_copied", {
+      flowStep: "final",
+      status: "copied",
+    });
   }
 
   function updateFeedback(field, value) {
@@ -1534,7 +1652,7 @@ export function AppExperience() {
             <div className="trust-tags">
               <span>省察支援</span>
               <span>安全確認</span>
-              <span>面談準備</span>
+              <span>確認レビュー</span>
             </div>
           </div>}
 
@@ -2021,61 +2139,35 @@ function StudentInputStep({
   ].filter((value) => String(value || "").trim()).length;
   return (
     <div className="student-step-card">
-      <div className="student-next-action-strip" aria-label="次にすること">
-        <strong>{memoReady ? "安全確認へ進めます" : "まず1場面だけ書けば進めます"}</strong>
-        <span>
-          {memoReady
-            ? "下のボタンで、問い返し前の本文を確認します。"
-            : "入力例を選ぶか、見たこと・自分の関わりを1つだけ書いてください。"}
-        </span>
-        <em>{supportCount >= 2 ? "助言や明日の観察も入っています" : "考え・明日・助言は後から足せます"}</em>
+      <div className="student-entry-card" aria-label="入力の入口">
+        <div className="student-entry-main">
+          <span className="label">次にすること</span>
+          <strong>{memoReady ? "安全確認へ進めます" : "まず1場面だけ書く"}</strong>
+          <p>
+            {memoReady
+              ? "下のボタンで、問い返し前の本文を確認します。意味が変わっていなければ次へ進みます。"
+              : "入力例を選ぶか、見たこと・自分の関わりを1つだけ自分の言葉で書いてください。"}
+          </p>
+        </div>
+        <div className="student-entry-steps" aria-label="入力から問い返しまで">
+          <span><em>1</em>入力例か自由入力</span>
+          <span><em>2</em>助言を足す</span>
+          <span><em>3</em>安全確認へ進む</span>
+        </div>
+        <p className="student-entry-safety">
+          名前や園名などは、問い返し前に安全な表現へ整えて確認します。実在の学生・子ども・園を少し置き換えた入力は避けてください。
+        </p>
+        <em className="student-entry-chip">{supportCount >= 2 ? "助言や明日の観察も入っています" : "考え・明日・助言は後から足せます"}</em>
       </div>
 
-      <SampleLibrary title="安全な架空入力例" description="1つ選ぶと、記録、助言、明日の観察まで入ります。自由入力も架空の場面で試せます。" samples={samples} selectedSampleId={selectedSampleId} onSelect={onSample} />
-
-      <p className="quick-safety-note">
-        名前や園名などは、問い返し前に安全な表現へ整えて確認します。実在の学生・子ども・園を少し置き換えた入力は避けてください。
-      </p>
+      <SampleLibrary title="安全な架空入力例" description="選ぶと主要な入力欄が入ります。自由入力でもそのまま進めます。" samples={samples} selectedSampleId={selectedSampleId} onSelect={onSample} />
 
       <form className="form-grid" onSubmit={onSubmit}>
         <div className="form-section-title wide">
           <span>1</span>
           <div>
-            <strong>基本情報</strong>
-            <p>日誌に必要な前提だけ入れます。</p>
-          </div>
-        </div>
-        <label>
-          日付
-          <input type="date" value={diary.date} onChange={(event) => onChange("date", event.target.value)} />
-        </label>
-        <label>
-          天気
-          <select value={diary.weather} onChange={(event) => onChange("weather", event.target.value)}>
-            {["晴れ", "くもり", "雨", "雪"].map((weather) => <option key={weather}>{weather}</option>)}
-          </select>
-        </label>
-        <label>
-          クラス・年齢
-          <select value={diary.age} onChange={(event) => onChange("age", event.target.value)}>
-            {["0歳児クラス", "1歳児クラス", "2歳児クラス", "3歳児クラス", "4歳児クラス", "5歳児クラス", "異年齢保育"].map((age) => <option key={age}>{age}</option>)}
-          </select>
-        </label>
-        <label>
-          場面
-          <select value={diary.scene} onChange={(event) => onChange("scene", event.target.value)}>
-            {["朝の自由遊び", "戸外遊び", "製作活動", "食事", "午睡", "帰りの会", "部分実習"].map((scene) => <option key={scene}>{scene}</option>)}
-          </select>
-        </label>
-        <label className="wide">
-          今日のねらい
-          <input value={diary.goal} placeholder="例：子ども同士の関わりを観察し、保育者の援助を学ぶ" onChange={(event) => onChange("goal", event.target.value)} />
-        </label>
-        <div className="form-section-title wide">
-          <span>2</span>
-          <div>
-            <strong>エピソード記録</strong>
-            <p>見たこと、自分の関わり、自分の気づきを分けて書きます。</p>
+            <strong>まず書くこと</strong>
+            <p>見た場面、自分の考え、明日見たいことに絞ります。</p>
           </div>
         </div>
         <label className="wide">
@@ -2091,10 +2183,10 @@ function StudentInputStep({
           <textarea value={diary.tomorrowTask} rows={4} placeholder={"例：友だちの遊びに入る前後で、子どもがどのような姿を見せるか観察したい。保育者の見守り方について学校の担当教員に相談したい。"} onChange={(event) => onChange("tomorrowTask", event.target.value)} />
         </label>
         <div className="form-section-title wide">
-          <span>3</span>
+          <span>2</span>
           <div>
             <strong>実習先で受けた助言</strong>
-            <p>助言の要点を、自分の理解、翌日の観察、担当教員への相談につなげます。</p>
+            <p>受けた指導がある時だけ、自分の理解と翌日の観察に戻します。</p>
           </div>
         </div>
         <div className="wide">
@@ -2103,6 +2195,37 @@ function StudentInputStep({
             onChange={onFeedbackChange}
           />
         </div>
+        <details className="optional-inputs wide">
+          <summary>必要な時だけ、日付・年齢・ねらいを直す</summary>
+          <div className="optional-input-grid">
+            <label>
+              日付
+              <input type="date" value={diary.date} onChange={(event) => onChange("date", event.target.value)} />
+            </label>
+            <label>
+              天気
+              <select value={diary.weather} onChange={(event) => onChange("weather", event.target.value)}>
+                {["晴れ", "くもり", "雨", "雪"].map((weather) => <option key={weather}>{weather}</option>)}
+              </select>
+            </label>
+            <label>
+              クラス・年齢
+              <select value={diary.age} onChange={(event) => onChange("age", event.target.value)}>
+                {["0歳児クラス", "1歳児クラス", "2歳児クラス", "3歳児クラス", "4歳児クラス", "5歳児クラス", "異年齢保育"].map((age) => <option key={age}>{age}</option>)}
+              </select>
+            </label>
+            <label>
+              場面
+              <select value={diary.scene} onChange={(event) => onChange("scene", event.target.value)}>
+                {["朝の自由遊び", "戸外遊び", "製作活動", "食事", "午睡", "帰りの会", "部分実習"].map((scene) => <option key={scene}>{scene}</option>)}
+              </select>
+            </label>
+            <label className="wide">
+              今日のねらい
+              <input value={diary.goal} placeholder="例：子ども同士の関わりを観察し、保育者の援助を学ぶ" onChange={(event) => onChange("goal", event.target.value)} />
+            </label>
+          </div>
+        </details>
         <details className="advanced-options wide">
           <summary>必要な時だけ、問い返しの深さを変える</summary>
           <div className="mode-switch" role="group" aria-label="問い返しの深さ">
@@ -2231,6 +2354,7 @@ function StudentFinalStep({ finalDraft, finalCheck, copied, busy, onFinalDraftCh
   const sanitizedText = normalizeMultiline(finalCheck?.payload?.memo || "");
   const hasFinalDraftText = hasMeaningfulText(finalDraft);
   const canCopyCheckedFinal = Boolean(finalCheck)
+    && finalCheck.status === "clear"
     && !finalCheck.blocked
     && (!finalCheck.changed || checkedText === sanitizedText);
   const copyLabel = copied
@@ -2402,10 +2526,10 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
     <div className="view-panel">
       <div className="context-bar">
         <div>
-          <span className="context-label">面談準備・確認レビュー</span>
-          <p>{session?.schoolName || "さくら保育者養成校"} の学生の振り返りを、教員が支援前に確認しやすい形に整理</p>
+          <span className="context-label">確認レビュー</span>
+          <p>{session?.schoolName || "さくら保育者養成校"} の学生の振り返りを、教員が確認しやすい形に整理</p>
         </div>
-        <div className="context-stats" aria-label="面談準備の特徴">
+        <div className="context-stats" aria-label="確認レビューの特徴">
           <span>教員確認ポイント</span>
           <span>根拠確認</span>
           <span>確認レビュー</span>
@@ -2415,7 +2539,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
       <div className="toolbar">
         <div>
           <span className="label">教員向け</span>
-          <h2>面談準備と確認レビュー</h2>
+          <h2>確認ダッシュボード</h2>
         </div>
         <span className="badge">学校導入</span>
       </div>
@@ -2423,12 +2547,14 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
       <div className="school-dashboard">
         <div className="school-metrics">
           <MetricCard label="登録学生" value={`${metrics?.students ?? 0}人`} detail={session?.className || "保育実習I / 2年A組"} />
-          <MetricCard label="確認記録" value={`${metrics?.generations ?? generationCount}件`} detail={schoolSummary?.configured ? "面談準備用に保存された確認記録" : "一時保存された参考記録"} />
+          <MetricCard label="確認記録" value={`${metrics?.generations ?? generationCount}件`} detail={schoolSummary?.configured ? "教員確認用に保存された確認記録" : "一時保存された参考記録"} />
           <MetricCard label="確認候補" value={`${metrics?.reviewCandidates ?? reviewQueue.length}件`} detail="当日確認・授業共有・学生本人に分類" />
           <MetricCard label="振り返り" value={`${metrics?.feedback ?? feedbackCount}件`} detail="指導を受けて学んだことと翌日の観察観点" />
         </div>
 
+        <TeacherActionPanel workloadPlan={workloadPlan} reviewQueueCount={reviewQueue.length} />
         <TeacherPreviewPanel />
+        <PocDecisionPanel />
 
         <section className="school-panel workload-panel">
           <div>
@@ -2460,7 +2586,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
 
         <section className="school-panel poc-metrics-panel">
           <div>
-            <span className="label">PoCで見る成果</span>
+            <span className="label">検証で見る成果</span>
             <h3>利用率より、翌日の行動と負担感を見る</h3>
           </div>
           <div className="poc-metrics-grid">
@@ -2498,9 +2624,9 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
         <section className="school-panel">
           <div>
             <span className="label">確認記録</span>
-            <h3>面談準備記録の書き出し</h3>
+            <h3>確認記録の書き出し</h3>
           </div>
-          <p className="muted">{enableLogExports ? "書き出しは面談準備用の概要に絞ります。学生入力や問い返しの根拠は、必要な記録だけ画面上で確認できます。" : "PoC前の合意ができるまで、確認記録の書き出しは停止しています。"}</p>
+          <p className="muted">{enableLogExports ? "書き出しは教員確認用の概要に絞ります。学生入力や問い返しの根拠は、必要な記録だけ画面上で確認できます。" : "学校の運用範囲が決まるまで、確認記録の書き出しは停止しています。"}</p>
           <div className="feedback-export-actions">
             <button className="secondary-button" type="button" onClick={onExportGenerationCsv} disabled={exportDisabled}>CSV</button>
             <button className="secondary-button" type="button" onClick={onExportGenerationJson} disabled={exportDisabled}>JSON</button>
@@ -2536,8 +2662,8 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
             ) : studentUsage.slice(0, 5).map((student) => (
               <article className="student-usage-item" key={student.id}>
                 <div>
-                  <strong>{student.name || student.email || "学生"}</strong>
-                  <p>{student.email || "メール未設定"} / 最終利用 {formatShortDate(student.latestAt)}</p>
+                  <strong>{student.name || "学生"}</strong>
+                  <p>最終利用 {formatShortDate(student.latestAt)} / 学生識別は学校の運用に合わせて確認</p>
                 </div>
                 <div className="student-usage-stats">
                   <span>日誌 {student.diary ?? 0}</span>
@@ -2557,7 +2683,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
             <span>1. 学生画面で安全な架空入力例を試す</span>
             <span>2. 安全な表現、問い返し、提出前チェックまで見る</span>
             <span>3. 教員画面で当日確認・授業共有・学生本人の分類を見る</span>
-            <span>4. 学校フォーマットと保存範囲をアンケートフォームへ返す</span>
+            <span>4. 学校フォーマットと保存範囲を確認フォームへ返す</span>
           </div>
         </section>
 
@@ -2588,7 +2714,7 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
             <h3>最近の確認記録</h3>
           </div>
           {recentLogs.length === 0 ? (
-            <p className="muted">まだ面談準備用の確認記録はありません。学生画面で省察チェックを行うとここに表示されます。</p>
+            <p className="muted">まだ教員確認用の記録はありません。学生画面で省察チェックを行うとここに表示されます。</p>
           ) : (
             <div className="school-log-list">
               {recentLogs.map((log) => (
@@ -2621,6 +2747,39 @@ function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, school
   );
 }
 
+function TeacherActionPanel({ workloadPlan, reviewQueueCount }) {
+  return (
+    <section className="school-panel teacher-action-panel">
+      <div className="teacher-action-head">
+        <div>
+          <span className="label">最初に見るもの</span>
+          <h3>教員が今日見る候補を絞る</h3>
+          <p>全件を読む前提ではなく、当日確認、授業共有、学生本人への返却に分けて、支援に必要な順で見ます。</p>
+        </div>
+        <strong>{workloadPlan.reviewNowCount}件</strong>
+      </div>
+      <div className="teacher-action-grid">
+        <article className="teacher-action-card urgent">
+          <span>当日確認</span>
+          <strong>{workloadPlan.reviewNowCount}件</strong>
+          <p>個人情報や強い断定など、早めに止めたい候補だけを見る。</p>
+        </article>
+        <article className="teacher-action-card class-share">
+          <span>授業共有</span>
+          <strong>{workloadPlan.classShareCount}件</strong>
+          <p>複数学生に共通しそうな観察・表現のつまずきをまとめる。</p>
+        </article>
+        <article className="teacher-action-card self-check">
+          <span>学生本人</span>
+          <strong>{workloadPlan.lowCount}件</strong>
+          <p>入力不足や見直しで整う候補は、提出前の自己確認へ戻す。</p>
+        </article>
+      </div>
+      <p className="teacher-action-note">確認候補全体は{reviewQueueCount}件です。教員画面の価値は、件数を増やすことではなく、確認の順番と扱いを減らすことに置きます。</p>
+    </section>
+  );
+}
+
 function MetricCard({ label, value, detail }) {
   return (
     <article className="metric-card">
@@ -2631,6 +2790,27 @@ function MetricCard({ label, value, detail }) {
   );
 }
 
+function PocDecisionPanel() {
+  return (
+    <section className="school-panel poc-decision-panel">
+      <div>
+        <span className="label">運用設計</span>
+        <h3>利用範囲と保存ルール</h3>
+        <p className="teacher-preview-lead">学校の実習指導に合わせて、使う範囲と保存ルールを先にそろえます。</p>
+      </div>
+      <div className="poc-decision-grid">
+        {pocDecisionItems.map((item) => (
+          <article key={item.label}>
+            <span>{item.label}</span>
+            <strong>{item.title}</strong>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function TeacherPreviewPanel({ title = "教員に確認していただきたいこと", items = teacherPreviewCheckpoints }) {
   const safeItems = safeRecordList(items);
   return (
@@ -2638,7 +2818,7 @@ function TeacherPreviewPanel({ title = "教員に確認していただきたい�
       <div>
         <span className="label">事前レビュー</span>
         <h3>{title}</h3>
-        <p className="teacher-preview-lead">PoCに進むかは、機能数ではなく、学生が使えるか、教員負担が増えないか、学校フォーマットに合うかで確認します。</p>
+        <p className="teacher-preview-lead">機能数ではなく、学生が使えるか、教員負担が増えないか、学校フォーマットに合うかで確認します。</p>
       </div>
       <div className="teacher-preview-grid">
         {safeItems.map((item) => (
@@ -2649,7 +2829,7 @@ function TeacherPreviewPanel({ title = "教員に確認していただきたい�
           </article>
         ))}
       </div>
-      <div className="school-step-list" aria-label="アンケートフォームで返す観点">
+      <div className="school-step-list" aria-label="確認フォームで返す観点">
         {teacherPreviewReturnItems.map((item, index) => (
           <span key={item}>{index + 1}. {item}</span>
         ))}
@@ -2900,6 +3080,19 @@ function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
       </div>
 
       <div className="school-dashboard">
+        <section className="review-command-strip" aria-label="確認レビューの現在地">
+          <div>
+            <span className="label">現在の確認範囲</span>
+            <strong>{visibleQueueLabel}</strong>
+            <p>{filteredQueue.length}件を表示中。まず当日確認だけを見て、授業共有と学生本人への返却は必要な時に切り替えます。</p>
+          </div>
+          <div className="review-command-stats">
+            <span>当日確認 {workloadPlan.reviewNowCount}</span>
+            <span>授業共有 {workloadPlan.classShareCount}</span>
+            <span>学生本人 {workloadPlan.lowCount}</span>
+          </div>
+        </section>
+
         <section className="school-panel review-control-panel">
           <div>
             <span className="label">絞り込み</span>
@@ -2949,7 +3142,16 @@ function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
           <p className="review-focus-note">
             初期表示は「当日確認」です。当日確認は個別に見る候補、授業共有はクラスで扱う候補、学生本人は提出前の自己確認へ返す候補です。
           </p>
-          <p className="muted">{schoolSummaryStatus || "通常は面談前に確認するポイントを中心に扱い、必要な候補だけ根拠を確認します。学生が省察チェックを行うと、確認候補と面談準備用の記録がここに集まります。"}</p>
+          <div className="review-route-guide" aria-label="対応先の使い分け">
+            {reviewRouteGuide.map((route) => (
+              <article key={route.label}>
+                <span>{route.label}</span>
+                <strong>{route.action}</strong>
+                <p>{route.detail}</p>
+              </article>
+            ))}
+          </div>
+          <p className="muted">{schoolSummaryStatus || "通常は教員が確認するポイントを中心に扱い、必要な候補だけ根拠を確認します。学生が省察チェックを行うと、確認候補と教員確認用の記録がここに集まります。"}</p>
         </section>
 
         <div className="review-workspace">
@@ -3058,7 +3260,7 @@ function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
             <h3>確認候補の扱い</h3>
           </div>
           <div className="school-step-list">
-            {["個人情報・要配慮情報は当日確認", "共通テーマは授業共有へ", "入力不足は学生本人の提出前の自己確認へ", "教員が面談前に確認するポイントとして扱う"].map((item, index) => (
+            {["個人情報・要配慮情報は当日確認", "共通テーマは授業共有へ", "入力不足は学生本人の提出前の自己確認へ", "教員が確認するポイントとして扱う"].map((item, index) => (
               <span key={item}>{index + 1}. {item}</span>
             ))}
           </div>
@@ -3179,6 +3381,16 @@ function FormatSettingsView({ session }) {
         </section>
 
         <TeacherPreviewPanel title="学校フォーマット確認の観点" items={formatReviewQuestions} />
+
+        <section className="school-panel format-safety-panel">
+          <div>
+            <span className="label">受領前の注意</span>
+            <h3>空欄フォーマットか見出しだけを扱う</h3>
+          </div>
+          <p className="muted">
+            記入済み日誌、実名、園名、診断名、家庭事情は入れず、欄名・順番・提出前の自己確認観点だけを確認します。
+          </p>
+        </section>
 
         <section className="school-panel">
           <div>

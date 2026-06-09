@@ -46,6 +46,10 @@ const nextConfig = {
         source: "/app",
         headers: noStoreHeaders,
       },
+      {
+        source: "/workspace",
+        headers: noStoreHeaders,
+      },
     ];
   },
 };

@@ -2,7 +2,7 @@ import { DetailCta, PublicFooter, PublicHeader } from "../site-components";
 
 export const metadata = {
   title: "機能 | Manalio",
-  description: "Manalioの学生向け省察支援、翌日の観察ポイント化、教員向け確認レビュー、学校フォーマット、教員が面談前に確認するポイントの機能概要です。",
+  description: "Manalioの学生向け省察支援、翌日の観察ポイント化、教員向け確認レビュー、学校フォーマット、教員確認観点の機能概要です。",
   alternates: {
     canonical: "/product",
   },
@@ -16,9 +16,9 @@ export default function ProductPage() {
 
         <section className="detail-hero">
           <span className="site-kicker">機能</span>
-          <h1>学生の翌日を変え、教員の面談準備を軽くする。</h1>
+          <h1>学生の翌日を変え、教員の確認負担を軽くする。</h1>
           <p>
-            Manalioは、学生が先に自分で書き、AIが問い返す流れを前提にしています。
+            Manalioは、学生が書いた観察と振り返りを出発点に、考え直すための問いと確認観点を返します。
             実習記録の効率化だけでなく、実習先で受けた指導を翌日の観察に変え、学校の指導内でリスクを下げながらAIを使える形にします。
           </p>
         </section>
@@ -37,7 +37,7 @@ export default function ProductPage() {
             <article>
               <span>02</span>
               <strong>教員画面</strong>
-              <p>教員確認が必要な候補、学生ごとの振り返り概要、教員が面談前に確認するポイントを、必要な範囲に絞って確認できます。</p>
+              <p>教員確認が必要な候補、学生ごとの振り返り概要、授業や個別指導で扱うポイントを、必要な範囲に絞って確認できます。</p>
             </article>
             <article>
               <span>03</span>

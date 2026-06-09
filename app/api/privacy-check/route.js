@@ -30,6 +30,26 @@ const FIELD_LABELS = {
   time: "活動時間",
 };
 
+const PRIVACY_CHECK_FIELDS_BY_KIND = {
+  diary: [
+    "date",
+    "weather",
+    "age",
+    "scene",
+    "goal",
+    "memo",
+    "reflection",
+    "tomorrowTask",
+    "feedbackGuidanceCategory",
+    "feedbackReceived",
+    "feedbackInterpretation",
+    "feedbackUnclear",
+    "feedbackTomorrowAction",
+    "feedbackTeacherQuestion",
+  ],
+  plan: ["age", "time", "activity", "planMemo"],
+};
+
 const FINDING_MESSAGES = {
   prompt_injection: "問い返しへの指示に見える表現は、記録本文から外して扱います。",
   contact_info: "連絡先は問い返しへ進む前に入力へ戻して見直すと安心です。",
@@ -127,16 +147,20 @@ function validatePrivacyCheckRequest(body) {
   return {
     kind: body.kind,
     phase,
-    payload: normalizePayloadText(body.payload),
+    payload: normalizePayloadText(body.payload, body.kind, phase),
   };
 }
 
-function normalizePayloadText(payload) {
+function normalizePayloadText(payload, kind, phase) {
+  const allowedFields = new Set(PRIVACY_CHECK_FIELDS_BY_KIND[kind] || []);
+  if (phase === "final") allowedFields.add("finalDraft");
   return Object.fromEntries(
-    Object.entries(payload).map(([key, value]) => [
-      key,
-      typeof value === "string" ? value.replace(/\r\n/g, "\n").trim() : value,
-    ]),
+    Object.entries(payload)
+      .filter(([key, value]) => allowedFields.has(key) && typeof value === "string")
+      .map(([key, value]) => [
+        key,
+        value.replace(/\r\n/g, "\n").trim(),
+      ]),
   );
 }
 

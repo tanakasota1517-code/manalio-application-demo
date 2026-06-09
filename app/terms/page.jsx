@@ -23,7 +23,7 @@ export default function TermsPage() {
       <LegalSection title="1. サービスの目的">
         <p>
           本サービスは、保育実習における観察、記録、省察、指導を受けて学んだことの整理を、学校の指導下で支援することを目的とします。
-          AIによる完成文の代筆ではなく、学生が先に書いた観察メモ、考察、翌日の観察観点、学校の担当教員への相談事項を見直す補助として提供されます。
+          AIによる完成文の代筆ではなく、学生が自分で書いた観察メモ、考察、翌日の観察観点、学校の担当教員への相談事項を見直す補助として提供されます。
         </p>
       </LegalSection>
 
@@ -96,7 +96,7 @@ function LegalHeader({ label, title }) {
     <header className="legal-hero">
       <a className="site-brand" href="/">
         <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
-        <span className="site-brand-caption">実習指導支援AIプラットフォーム</span>
+        <span className="site-brand-caption">保育実習の省察支援</span>
       </a>
       <span className="site-kicker">{label}</span>
       <h1>{title}</h1>

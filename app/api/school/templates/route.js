@@ -1,4 +1,4 @@
-import { getServerSessionContext, isRestConfigured, supabaseRestFetch } from "../../_supabase.js";
+import { getServerSessionContext, isRestConfigured, shouldFailClosedWhenRestMissing, supabaseRestFetch } from "../../_supabase.js";
 import { DEFAULT_SCHOOL_FORMAT, normalizeSchoolFormat, toSchoolFormatRow } from "../../_schoolFormat.js";
 import { enforceRateLimit } from "../../_rateLimit.js";
 import { enforceSameOriginRequest } from "../../_requestSecurity.js";
@@ -9,6 +9,18 @@ export const runtime = "nodejs";
 export async function GET(request) {
   const sameOriginResponse = enforceSameOriginRequest(request);
   if (sameOriginResponse) return sameOriginResponse;
+
+  if (shouldFailClosedWhenRestMissing()) {
+    return Response.json(
+      {
+        configured: false,
+        schemaReady: false,
+        code: "rest_not_configured",
+        error: "学校フォーマット保存設定が未完了のため、標準フォーマット表示へ戻さず停止しています。",
+      },
+      { status: 503 },
+    );
+  }
 
   if (!isRestConfigured()) {
     return Response.json({
@@ -44,12 +56,23 @@ export async function GET(request) {
 }
 
 export async function PUT(request) {
+  const sameOriginResponse = enforceSameOriginRequest(request);
+  if (sameOriginResponse) return sameOriginResponse;
+
+  if (shouldFailClosedWhenRestMissing()) {
+    return Response.json(
+      {
+        saved: false,
+        code: "rest_not_configured",
+        error: "学校フォーマット保存設定が未完了のため保存できません。",
+      },
+      { status: 503 },
+    );
+  }
+
   if (!isRestConfigured()) {
     return Response.json({ error: "学校フォーマット保存先が未設定のため保存できません。" }, { status: 503 });
   }
-
-  const sameOriginResponse = enforceSameOriginRequest(request);
-  if (sameOriginResponse) return sameOriginResponse;
 
   const rateLimitResponse = enforceRateLimit(request, {
     namespace: "school-template-save",

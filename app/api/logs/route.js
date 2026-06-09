@@ -1,4 +1,4 @@
-import { getServerSessionContext, isRestConfigured, supabaseRestFetch } from "../_supabase.js";
+import { getServerSessionContext, isRestConfigured, shouldFailClosedWhenRestMissing, supabaseRestFetch } from "../_supabase.js";
 import { enforceRateLimit } from "../_rateLimit.js";
 import { enforceSameOriginRequest } from "../_requestSecurity.js";
 import { readLimitedJsonBody } from "../_jsonRequest.js";
@@ -44,6 +44,17 @@ export async function POST(request) {
 
     if (!record || typeof record !== "object" || Array.isArray(record)) {
       return Response.json({ error: "record is required" }, { status: 400 });
+    }
+
+    if (shouldFailClosedWhenRestMissing()) {
+      return Response.json(
+        {
+          persisted: false,
+          code: "rest_not_configured",
+          error: "学校データ保存設定が未完了のため、ログ保存を停止しています。",
+        },
+        { status: 503 },
+      );
     }
 
     if (!isRestConfigured()) {

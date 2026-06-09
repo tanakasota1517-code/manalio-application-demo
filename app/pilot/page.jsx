@@ -69,7 +69,7 @@ export default function PilotPage() {
             <article>
               <span>標準導入</span>
               <strong>学科導入</strong>
-              <p>複数クラス、確認候補、学校フォーマット、教員が面談前に確認するポイントを含めます。</p>
+              <p>複数クラス、確認候補、学校フォーマット、教員が確認するポイントを含めます。</p>
             </article>
             <article>
               <span>学校導入</span>
@@ -81,7 +81,7 @@ export default function PilotPage() {
 
         <section className="detail-section">
           <div className="detail-section-head">
-            <span className="site-kicker">PoCで確認すること</span>
+            <span className="site-kicker">検証導入で見ること</span>
             <h2>導入可否より先に、教育的に使える範囲を確認します。</h2>
           </div>
           <div className="detail-card-grid">

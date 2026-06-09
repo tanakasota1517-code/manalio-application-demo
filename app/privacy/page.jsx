@@ -67,7 +67,7 @@ export default function PrivacyPage() {
         <p>
           法令に基づく場合を除き、本人または導入組織の同意なく、個人情報を第三者へ販売または目的外提供しません。
           導入組織内では、実習指導、学生ごとの振り返り、確認候補、確認記録の確認のため、権限を持つ教員・管理者が必要な範囲で情報を閲覧できます。
-          教員向けの通常画面や書き出しでは、入力本文やAI本文をそのまま広く配布するのではなく、入力概要、提出前の自己確認、確認観点、教員が面談前に確認するポイントを中心に扱います。
+          教員向けの通常画面や書き出しでは、入力本文やAI本文をそのまま広く配布するのではなく、入力概要、提出前の自己確認、確認観点、教員が確認するポイントを中心に扱います。
         </p>
       </LegalSection>
 
@@ -102,7 +102,7 @@ function LegalHeader({ label, title }) {
     <header className="legal-hero">
       <a className="site-brand" href="/">
         <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
-        <span className="site-brand-caption">実習指導支援AIプラットフォーム</span>
+        <span className="site-brand-caption">保育実習の省察支援</span>
       </a>
       <span className="site-kicker">{label}</span>
       <h1>{title}</h1>

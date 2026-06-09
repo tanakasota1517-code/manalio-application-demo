@@ -13,7 +13,7 @@ Shortly describe the current product stage. Keep it factual and avoid overstatin
 ## What This Makes Possible
 
 - Explain why the progress matters.
-- Connect the work to user validation, PoC readiness, safety, or review quality.
+- Connect the work to user validation, safety, review quality, or the next small learning step.
 
 ## Next Focus
 
@@ -23,4 +23,3 @@ Shortly describe the current product stage. Keep it factual and avoid overstatin
 ## Help Wanted
 
 - List specific questions for SS members, mentors, or future users.
-

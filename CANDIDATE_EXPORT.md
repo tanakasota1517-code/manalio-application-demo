@@ -22,7 +22,7 @@ GitHubへ出す時は、新しい公開リポジトリを作り、この候補�
 - 学校名、教員名、学生情報、子どもの実名、実習先情報が入っている。
 - `docs/agent-vault/`、`docs/archive/`、`docs/meeting-notes/`、`obsidian/` が入っている。
 - `.next/`、`node_modules/`、`.expo/`、`outputs/` をzipやGitHub Webアップロードで一緒に上げようとしている。
-- READMEに、PoC前MVP、実データ入力禁止、日誌代筆ではないことが書かれていない。
+- READMEに、BootCamp向け公開プロトタイプ、実データ入力禁止、日誌代筆ではないことが書かれていない。
 
 ビルド後に `.next/` が作られた場合、gitで公開するなら `.gitignore` で追跡対象外になります。zip化やGitHub Webアップロードを使う場合は、生成物を混ぜないため、候補を作り直してからアップロードしてください。
 
@@ -45,4 +45,4 @@ If `npm run build` creates `.next/`, do not upload this folder as a zip or via G
 
 Stop if any internal notes, teacher-review URLs, login credentials, passwords, real school data, `.env.local`, or archived work logs appear.
 
-Generated path: outputs/application-github-candidate-2026-05-29T13-12-06-020Z
+Generated path: outputs/application-github-candidate-2026-06-09T14-57-31-014Z

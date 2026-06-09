@@ -3,7 +3,7 @@ import { SITE_URL } from "./site-config";
 import PwaRegister from "./pwa-register";
 
 const siteTitle = "Manalio | 保育者養成校向けAI実習指導支援";
-const siteDescription = "保育実習の日誌づくりを、学校フォーマット、確認候補、教員が面談前に確認するポイントとともに安全に扱えるAI実習指導支援プラットフォームです。";
+const siteDescription = "保育実習の日誌づくりを、学校フォーマット、確認候補、教員が確認するポイントとともに安全に扱えるAI実習指導支援プラットフォームです。";
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),

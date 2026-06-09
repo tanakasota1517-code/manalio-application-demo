@@ -23,6 +23,21 @@ export function isRestConfigured() {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 }
 
+export function isProductionLikeRuntime() {
+  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
+  if (["production", "prod", "preview", "staging"].includes(explicitRuntime)) return true;
+  if (["development", "dev", "local", "test"].includes(explicitRuntime)) return false;
+
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
+  if (["production", "preview"].includes(vercelEnv)) return true;
+
+  return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
+}
+
+export function shouldFailClosedWhenRestMissing() {
+  return !SUPABASE_DISABLED && isProductionLikeRuntime() && !isRestConfigured();
+}
+
 export async function getAuthenticatedUser(request) {
   if (!isAuthConfigured()) return null;
   const accessToken = getCookieValue(request, ACCESS_COOKIE);
@@ -130,4 +145,8 @@ function safeJsonParse(text) {
   } catch {
     return null;
   }
+}
+
+function normalizeRuntimeEnv(value) {
+  return String(value || "").trim().toLowerCase();
 }

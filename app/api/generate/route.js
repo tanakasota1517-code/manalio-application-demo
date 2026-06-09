@@ -1,4 +1,10 @@
-import { getServerSessionContext, isAuthConfigured, isRestConfigured, supabaseRestFetch } from "../_supabase.js";
+import {
+  getServerSessionContext,
+  isAuthConfigured,
+  isRestConfigured,
+  shouldFailClosedWhenRestMissing,
+  supabaseRestFetch,
+} from "../_supabase.js";
 import { buildSchoolFormatPromptBlock, getSchoolFormatForSchool, summarizeSchoolFormat } from "../_schoolFormat.js";
 import { buildHoikuGuidelinePromptBlock } from "../_hoikuGuideline.js";
 import { enforceRateLimit } from "../_rateLimit.js";
@@ -45,6 +51,7 @@ const STAFF_DAILY_GENERATION_LIMIT = parsePositiveIntegerSetting(process.env.MAN
   max: 1000,
 });
 const BEDROCK_GUARDRAIL_MODES = new Set(["off", "compare", "enforce"]);
+const NO_STORE_HEADERS = { "cache-control": "no-store" };
 
 export const runtime = "nodejs";
 
@@ -67,7 +74,7 @@ export async function POST(request) {
     if (shouldRequireAuth()) {
       authContext = await getServerSessionContext(request);
       if (!authContext.user?.id) {
-        return Response.json(
+        return jsonNoStore(
           {
             code: "auth_required",
             error: "AI生成にはログインが必要です。学校アカウントでログインしてください。",
@@ -76,7 +83,7 @@ export async function POST(request) {
         );
       }
       if (!authContext.profile?.id) {
-        return Response.json(
+        return jsonNoStore(
           {
             code: "profile_required",
             error: "学校プロフィールが未設定のため、AI生成を利用できません。",
@@ -105,7 +112,7 @@ export async function POST(request) {
     if (generationId) {
       content.generationId = generationId;
     }
-    return Response.json(content);
+    return jsonNoStore(content);
   } catch (error) {
     const timedOut = error.name === "TimeoutError";
     const publicError = error instanceof PublicError;
@@ -113,7 +120,7 @@ export async function POST(request) {
     if (!publicError && !timedOut) {
       console.error("Generation request failed:", error.details || error.stack || error.message);
     }
-    return Response.json(
+    return jsonNoStore(
       {
         code: timedOut ? "provider_timeout" : publicError ? error.code : "server_error",
         error: timedOut
@@ -501,7 +508,7 @@ function shouldRequireAuth() {
 function validateGenerateRuntimeConfig() {
   if (!isProductionLikeRuntime()) return null;
   if (!isAuthConfigured()) {
-    return Response.json(
+    return jsonNoStore(
       {
         code: "auth_not_configured",
         error: "本番環境の認証設定が未完了のため、AI生成を停止しています。",
@@ -509,39 +516,48 @@ function validateGenerateRuntimeConfig() {
       { status: 503 },
     );
   }
-    if (USE_MOCK && isStrictProductionRuntime()) {
-      return Response.json(
-        {
-          code: "mock_generation_disabled",
-          error: "正式公開環境ではモック生成を利用できません。",
-        },
-        { status: 503 },
-      );
+  if (shouldFailClosedWhenRestMissing()) {
+    return jsonNoStore(
+      {
+        code: "rest_not_configured",
+        error: "本番環境の学校データ保存設定が未完了のため、AI生成を停止しています。",
+      },
+      { status: 503 },
+    );
+  }
+  if (USE_MOCK && isStrictProductionRuntime()) {
+    return jsonNoStore(
+      {
+        code: "mock_generation_disabled",
+        error: "正式公開環境ではモック生成を利用できません。",
+      },
+      { status: 503 },
+    );
   }
   return null;
 }
 
 function isProductionLikeRuntime() {
-  const explicitRuntime = String(process.env.MANABI_RUNTIME_ENV || "").toLowerCase();
+  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
   if (["production", "prod", "preview", "staging"].includes(explicitRuntime)) return true;
   if (["development", "dev", "local", "test"].includes(explicitRuntime)) return false;
 
-  const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
   if (["production", "preview"].includes(vercelEnv)) return true;
 
-  return String(process.env.NODE_ENV || "").toLowerCase() === "production";
+  return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
 }
 
 function isStrictProductionRuntime() {
-  const explicitRuntime = String(process.env.MANABI_RUNTIME_ENV || "").toLowerCase();
+  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
   if (["production", "prod"].includes(explicitRuntime)) return true;
   if (["preview", "staging", "development", "dev", "local", "test"].includes(explicitRuntime)) return false;
 
-  const vercelEnv = String(process.env.VERCEL_ENV || "").toLowerCase();
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
   if (vercelEnv === "production") return true;
   if (["preview", "development"].includes(vercelEnv)) return false;
 
-  return String(process.env.NODE_ENV || "").toLowerCase() === "production";
+  return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
 }
 
 async function enforceDailyGenerationLimit(context) {
@@ -554,7 +570,7 @@ async function enforceDailyGenerationLimit(context) {
   ).catch((error) => {
     console.warn("Generation limit check failed:", error.details || error.message);
     if (requiresDurableUsageControls(context)) {
-      return Response.json(
+      return jsonNoStore(
         {
           code: "usage_limit_check_unavailable",
           error: "利用上限を確認できないため、AI生成を一時停止しています。少し時間を置いて再試行してください。",
@@ -569,7 +585,7 @@ async function enforceDailyGenerationLimit(context) {
   if (!Array.isArray(rows)) return null;
   if (rows.length < limit) return null;
 
-  return Response.json(
+  return jsonNoStore(
     {
       code: "daily_generation_limit",
       error: "本日のAI生成上限に達しました。学校管理者に利用枠の確認を依頼してください。",
@@ -587,6 +603,7 @@ function getJapanDayStartUtcIso() {
 
 async function persistGenerationLog(context, body, content) {
   if (!isRestConfigured()) return null;
+  const sanitizedOutput = sanitizeGenerationOutputForLog(content);
 
   const rows = await supabaseRestFetch("/generation_logs", {
     method: "POST",
@@ -599,8 +616,8 @@ async function persistGenerationLog(context, body, content) {
       model: null,
       subscription: body.subscription || "free",
       input: sanitizeGenerationInputForLog(body.kind, body.payload, body.privacyGuard),
-      output: sanitizeGenerationOutputForLog(content),
-      checks: Array.isArray(content.checks) ? content.checks.slice(0, 5) : null,
+      output: sanitizedOutput,
+      checks: sanitizedOutput.checks?.length ? sanitizedOutput.checks : null,
       session: buildLogSession(context.session),
       status: "completed",
     },
@@ -855,6 +872,16 @@ class PublicError extends Error {
     this.code = code;
     this.provider = provider;
   }
+}
+
+function jsonNoStore(body, init = {}) {
+  const headers = new Headers(init.headers || {});
+  headers.set("cache-control", "no-store");
+  return Response.json(body, { ...init, headers });
+}
+
+function normalizeRuntimeEnv(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function extractMessageContent(data) {

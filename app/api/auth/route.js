@@ -43,18 +43,18 @@ export async function GET(request) {
       const refreshed = await refreshAuthSession(refreshToken);
       currentAccessToken = refreshed.access_token;
       user = refreshed.user || (currentAccessToken ? await getAuthUser(currentAccessToken) : null);
-      cookieUpdates.push(...buildAuthCookies(refreshed));
+      cookieUpdates.push(...buildAuthCookies(refreshed, request));
     }
 
     if (!user) {
-      return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies());
+      return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies(request));
     }
 
     const session = await buildSessionFromUser(user, { accessToken: currentAccessToken });
     return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session }, cookieUpdates);
   } catch (error) {
     console.warn("Supabase session restore failed:", error.message);
-    return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies());
+    return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies(request));
   }
 }
 
@@ -79,7 +79,7 @@ export async function POST(request) {
   const action = body.action;
 
   if (action === "signOut") {
-    return jsonWithCookies({ ok: true }, clearAuthCookies());
+    return jsonWithCookies({ ok: true }, clearAuthCookies(request));
   }
 
   const rateLimitResponse = enforceRateLimit(request, {
@@ -102,10 +102,10 @@ export async function POST(request) {
 
   try {
     if (action === "signUp") {
-      return handleSignUp(body);
+      return handleSignUp(body, request);
     }
     if (action === "signIn") {
-      return handleSignIn(body);
+      return handleSignIn(body, request);
     }
     return Response.json({ ok: false, error: "auth action is invalid" }, { status: 400 });
   } catch (error) {
@@ -122,7 +122,7 @@ export async function POST(request) {
   }
 }
 
-async function handleSignIn(body) {
+async function handleSignIn(body, request) {
   const credentials = normalizeCredentials(body);
   const auth = await supabaseAuthFetch("/token?grant_type=password", {
     method: "POST",
@@ -140,11 +140,11 @@ async function handleSignIn(body) {
       configured: true,
       session,
     },
-    buildAuthCookies(auth),
+    buildAuthCookies(auth, request),
   );
 }
 
-async function handleSignUp(body) {
+async function handleSignUp(body, request) {
   if (!ALLOW_PUBLIC_SIGNUP) {
     throw new AuthError(
       "signup_disabled",
@@ -191,7 +191,7 @@ async function handleSignUp(body) {
       configured: true,
       session,
     },
-    buildAuthCookies(auth.session || auth),
+    buildAuthCookies(auth.session || auth, request),
   );
 }
 
@@ -381,28 +381,46 @@ function mapSupabaseError(data, status) {
   return new AuthError("auth_failed", "学校アカウント認証でエラーが発生しました。", status || 500, message);
 }
 
-function buildAuthCookies(auth) {
+function buildAuthCookies(auth, request) {
   const accessToken = auth.access_token;
   const refreshToken = auth.refresh_token;
   if (!accessToken || !refreshToken) return [];
   const accessMaxAge = Number(auth.expires_in || 3600);
+  const secure = shouldUseSecureCookies(request);
   return [
-    serializeCookie(ACCESS_COOKIE, accessToken, { maxAge: accessMaxAge }),
-    serializeCookie(REFRESH_COOKIE, refreshToken, { maxAge: 60 * 60 * 24 * 30 }),
+    serializeCookie(ACCESS_COOKIE, accessToken, { maxAge: accessMaxAge, secure }),
+    serializeCookie(REFRESH_COOKIE, refreshToken, { maxAge: 60 * 60 * 24 * 30, secure }),
   ];
 }
 
-function clearAuthCookies() {
+function clearAuthCookies(request) {
+  const secure = shouldUseSecureCookies(request);
   return [
-    serializeCookie(ACCESS_COOKIE, "", { maxAge: 0 }),
-    serializeCookie(REFRESH_COOKIE, "", { maxAge: 0 }),
+    serializeCookie(ACCESS_COOKIE, "", { maxAge: 0, secure }),
+    serializeCookie(REFRESH_COOKIE, "", { maxAge: 0, secure }),
   ];
 }
 
 function serializeCookie(name, value, options = {}) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const secure = options.secure ? "; Secure" : "";
   const maxAge = Number(options.maxAge || 0);
   return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Strict; HttpOnly${secure}`;
+}
+
+function shouldUseSecureCookies(request) {
+  const override = normalizeRuntimeEnv(process.env.MANABI_COOKIE_SECURE);
+  if (override === "true") return true;
+
+  try {
+    if (new URL(request?.url || "").protocol === "https:") return true;
+  } catch {
+    // Invalid or missing request URL falls back to environment-based detection.
+  }
+
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
+  if (["production", "preview"].includes(vercelEnv)) return true;
+
+  return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
 }
 
 function jsonWithCookies(payload, cookieHeaders = [], status = 200) {
@@ -457,6 +475,10 @@ function safeJsonParse(text) {
   } catch {
     return null;
   }
+}
+
+function normalizeRuntimeEnv(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 class AuthError extends Error {

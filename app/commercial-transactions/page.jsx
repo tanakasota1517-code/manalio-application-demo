@@ -29,7 +29,7 @@ export default function CommercialTransactionsPage() {
       <header className="legal-hero">
         <a className="site-brand" href="/">
           <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
-          <span className="site-brand-caption">実習指導支援AIプラットフォーム</span>
+          <span className="site-brand-caption">保育実習の省察支援</span>
         </a>
         <span className="site-kicker">事業者情報</span>
         <h1>特定商取引法に基づく表示</h1>

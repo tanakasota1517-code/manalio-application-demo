@@ -1,6 +1,6 @@
 # Manalio
 
-Manalio is a PoC-stage prototype for childcare teacher training schools. It helps students review their own practicum notes, notice privacy-sensitive wording before using AI support, and connect feedback from the practicum site to the next day's observation.
+Manalio is a public prototype for childcare teacher training schools. It helps students review their own practicum notes, notice privacy-sensitive wording before using AI support, and connect feedback from the practicum site to the next day's observation.
 
 This is not a diary-writing shortcut, an auto-grading tool, or a production deployment.
 
@@ -24,7 +24,7 @@ These notes are intentionally limited to product progress, validation status, an
 
 - Do not enter real student names, child names, school names, practicum site names, phone numbers, addresses, diagnoses, family situations, or other personal information.
 - The included sample content is fictional.
-- The prototype is for pre-PoC discussion and review, not for formal school operation.
+- The prototype is for BootCamp review and small-scope validation, not for formal school operation.
 - AI support is framed as reflection and preparation, not as final diary generation or grade judgment.
 
 ## Local Demo

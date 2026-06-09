@@ -1,8 +1,13 @@
+import { isProductionLikeRuntime } from "../_supabase.js";
+
+const NO_STORE_HEADERS = { "cache-control": "no-store" };
+
 export const runtime = "nodejs";
 
 export async function GET() {
   const useMock = process.env.MANABI_USE_MOCK === "true";
   const exposeDetails = process.env.MANABI_EXPOSE_HEALTH_DETAILS === "true";
+  const canExposeDetails = exposeDetails && !isProductionLikeRuntime();
   const supabaseDisabled = process.env.MANABI_DISABLE_SUPABASE === "true";
   const hasAnthropicKey = Boolean(process.env.ANTHROPIC_API_KEY);
   const hasOpenAIKey = Boolean(process.env.OPENAI_API_KEY);
@@ -37,8 +42,8 @@ export async function GET() {
     },
   };
 
-  if (exposeDetails) {
-    return Response.json(health);
+  if (canExposeDetails) {
+    return Response.json(health, { headers: NO_STORE_HEADERS });
   }
 
   return Response.json({
@@ -46,5 +51,5 @@ export async function GET() {
     mode: health.mode,
     auth: health.auth.supabase,
     persistence: health.persistence.supabase,
-  });
+  }, { headers: NO_STORE_HEADERS });
 }

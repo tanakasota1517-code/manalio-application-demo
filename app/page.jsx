@@ -41,7 +41,7 @@ const issueCards = [
 const promiseCards = [
   {
     title: "観察メモをもとに、学びを整理",
-    body: "学生が先に書いた事実・考えたこと・明日見たいことに対して、問い返しと提出前の自己確認を返します。",
+    body: "学生が自分で書いた事実・考えたこと・明日見たいことに対して、問い返しと提出前の自己確認を返します。",
     icon: "memo",
   },
   {
@@ -55,7 +55,7 @@ const promiseCards = [
     icon: "grid",
   },
   {
-    title: "教員が支援前に、学びの過程を確認",
+    title: "教員が、学びの過程を確認",
     body: "全件添削を増やすのではなく、学生が翌日に何を見ようとしたか、どこで支援が必要だったかを教員が確認する材料として整理します。",
     icon: "memo",
   },
@@ -85,7 +85,7 @@ const feedbackLoopSteps = [
 ];
 
 const governanceItems = [
-  "学生が先に自分で書き、AIは問い返しと安全確認に徹する",
+  "学生の観察記録を起点にし、AIは問い返しと安全確認に徹する",
   "入力にない事実は補完せず、未記入の観点は確認項目として残す",
   "保育所保育指針は、断定ではなく観察・省察を見直す観点として参照",
   "子どもの実名・評価的表現・断定的な内面推測を避ける設計",
@@ -112,7 +112,7 @@ const positioningCards = [
   {
     label: "Manalio",
     title: "学生の省察と翌日の観察を支援",
-    body: "学生の観察メモ、実習先指導の受け止め、自己確認、面談材料化を一つの学習プロセスとして扱います。",
+    body: "学生の観察メモ、実習先指導の受け止め、自己確認、教員が学生との面談や指導で確認するポイントを一つの学習プロセスとして扱います。",
   },
 ];
 
@@ -134,7 +134,7 @@ const caseSteps = [
   {
     label: "導入 02",
     title: "1科目・1クラスから検証導入",
-    body: "実習日誌フォーマット、確認観点、教員が面談前に確認するポイントの見え方を、学校の実運用に合わせて確認します。",
+    body: "実習日誌フォーマット、確認観点、教員が確認するポイントの見え方を、学校の実運用に合わせて確認します。",
   },
   {
     label: "導入 03",
@@ -143,14 +143,58 @@ const caseSteps = [
   },
 ];
 
+const teacherTriageItems = [
+  {
+    label: "当日確認",
+    title: "早めに止めたい候補だけ見る",
+    body: "個人情報、強い断定、実習先との関係に影響しそうな表現を先に確認します。",
+    tone: "urgent",
+  },
+  {
+    label: "授業共有",
+    title: "共通するつまずきを扱う",
+    body: "複数学生に共通しそうな観察・表現・受け止め方を、匿名化して授業へ戻します。",
+    tone: "class",
+  },
+  {
+    label: "学生本人",
+    title: "自己確認へ戻す",
+    body: "入力不足や別の言い方で整う候補は、教員が抱え込まず学生本人の見直しへ返します。",
+    tone: "self",
+  },
+];
+
+const safetyFlowItems = [
+  {
+    label: "01",
+    title: "入力時の気づき",
+    body: "実名、園名、家庭事情などを責める表示ではなく、記録前の確認として知らせます。",
+  },
+  {
+    label: "02",
+    title: "外部AI送信前",
+    body: "送ってよい本文かを確認し、高リスク情報は送信前に止める前提で設計します。",
+  },
+  {
+    label: "03",
+    title: "教員が扱う範囲",
+    body: "全ログではなく、支援に必要な論点、分類、確認候補に絞って扱います。",
+  },
+  {
+    label: "04",
+    title: "学校ごとの運用範囲",
+    body: "保存範囲、閲覧範囲、保存期間、外部AI利用範囲を学校の方針に合わせて扱います。",
+  },
+];
+
 const faqItems = [
   {
     question: "学生がそのまま提出してしまう心配はありませんか。",
-    answer: "学生が先に自分で書いた内容に対して、未入力項目や教員へ確認したい点を問いとして返す設計です。学校の方針に合わせて、提出前の自己確認や教員確認候補も組み合わせられます。",
+    answer: "学生が自分で書いた内容に対して、未入力項目や教員へ確認したい点を問いとして返す設計です。学校の方針に合わせて、提出前の自己確認や教員確認候補も組み合わせられます。",
   },
   {
     question: "学校指定の実習日誌フォーマットに合わせられますか。",
-    answer: "見出し、確認観点、文体、禁止したい表現を学校ごとに設定できる前提で設計しています。初回PoCでは実習日誌に範囲を絞り、実際のフォーマットを共有いただいた後に導入範囲を調整します。",
+    answer: "見出し、確認観点、文体、禁止したい表現を学校ごとに設定できる前提で設計しています。最初の検証では実習日誌に範囲を絞り、実際のフォーマットを共有いただいた後に導入範囲を調整します。",
   },
   {
     question: "個人情報や子どもの実名はどう扱いますか。",
@@ -189,7 +233,7 @@ export default function Home() {
         <a className="manalio-brand" href="/" aria-label="Manalio トップ">
           <img className="manalio-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" width="320" height="72" />
           <span className="manalio-brand-text">
-            <small>実習指導支援AIプラットフォーム</small>
+            <small>保育実習の省察支援</small>
           </span>
         </a>
         <nav className="manalio-nav" aria-label="公開サイト">
@@ -234,7 +278,7 @@ export default function Home() {
         <div className="manalio-hero-visual" aria-label="省察支援と教員確認のイメージ">
           <div className="manalio-workflow">
             <div className="manalio-steps" aria-hidden="true">
-              <span><b>1</b>学生が先に書く</span>
+              <span><b>1</b>学生が観察を書く</span>
               <span><b>2</b>指導を受け止める</span>
               <span><b>3</b>翌日の観察へ</span>
             </div>
@@ -268,7 +312,7 @@ export default function Home() {
                 </section>
               </article>
               <article className="manalio-work-card checks">
-                <h2>面談で扱う観点</h2>
+                <h2>教員が確認する観点</h2>
                 <ul>
                   <li>個人情報が含まれていないか</li>
                   <li>入力内容から確認できない事実が含まれていないか</li>
@@ -325,7 +369,7 @@ export default function Home() {
       <section className="manalio-section manalio-value" id="value">
         <div className="manalio-value-copy">
           <p className="manalio-kicker">Manalioが実現すること</p>
-          <h2>学生の学びを深め、教員の指導を支えるAIプラットフォーム</h2>
+          <h2>学生の学びを深め、教員の確認負担を軽くする。</h2>
           <div className="manalio-promise-list">
             {promiseCards.map((card) => (
               <article key={card.title}>
@@ -338,22 +382,26 @@ export default function Home() {
             ))}
           </div>
         </div>
-        <div className="manalio-dashboard" aria-label="教員ダッシュボードのイメージ">
+        <div className="manalio-dashboard" aria-label="教員確認画面のイメージ">
           <figure className="manalio-dashboard-image">
-            <img src="/images/manalio-dashboard-mock.jpg" alt="学生一覧や提出状況を確認できる教員ダッシュボードの画面イメージ" width="1000" height="643" loading="lazy" decoding="async" />
+            <img src="/images/manalio-dashboard-mock.jpg" alt="学生一覧や提出状況を確認できる教員確認画面のイメージ" width="1000" height="643" loading="lazy" decoding="async" />
           </figure>
           <div className="manalio-dashboard-note">
-            <h3>教員ダッシュボードでできること</h3>
+            <h3>教員画面でできること</h3>
             <ul>
               <li>学生の振り返り状況を必要範囲で確認</li>
               <li>当日見る候補を高優先だけに絞り込み</li>
-              <li>教員が支援に使う観点を設定・共有</li>
+              <li>教員が確認する観点を設定・共有</li>
               <li>教員が確認・声かけに使う振り返り材料を整理</li>
             </ul>
-            <div className="manalio-workload-mini" aria-label="教員確認の優先度">
-              <span><strong>高</strong>当日確認</span>
-              <span><strong>中</strong>授業内共有</span>
-              <span><strong>低</strong>学生が見直し</span>
+            <div className="manalio-teacher-triage" aria-label="教員確認の扱い分け">
+              {teacherTriageItems.map((item) => (
+                <article className={item.tone} key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.title}</strong>
+                  <p>{item.body}</p>
+                </article>
+              ))}
             </div>
           </div>
         </div>
@@ -390,6 +438,15 @@ export default function Home() {
         <div className="manalio-governance-grid">
           {governanceItems.map((item) => (
             <p key={item}>{item}</p>
+          ))}
+        </div>
+        <div className="manalio-safety-flow" aria-label="安全設計の流れ">
+          {safetyFlowItems.map((item) => (
+            <article key={item.title}>
+              <span>{item.label}</span>
+              <strong>{item.title}</strong>
+              <p>{item.body}</p>
+            </article>
           ))}
         </div>
       </section>
@@ -499,7 +556,7 @@ export default function Home() {
         <a className="manalio-brand" href="/" aria-label="Manalio トップ">
           <img className="manalio-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" width="320" height="72" decoding="async" />
           <span className="manalio-brand-text">
-            <small>実習指導支援AIプラットフォーム</small>
+            <small>保育実習の省察支援</small>
           </span>
         </a>
         <nav aria-label="法務情報">

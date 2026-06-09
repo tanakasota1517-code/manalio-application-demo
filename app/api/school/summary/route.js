@@ -1,4 +1,4 @@
-import { getServerSessionContext, isRestConfigured, supabaseRestFetch } from "../../_supabase.js";
+import { getServerSessionContext, isRestConfigured, shouldFailClosedWhenRestMissing, supabaseRestFetch } from "../../_supabase.js";
 import { enforceRateLimit } from "../../_rateLimit.js";
 import { enforceSameOriginRequest } from "../../_requestSecurity.js";
 import { redactSensitiveTextForPreview } from "../../_privacy.js";
@@ -46,6 +46,17 @@ export async function GET(request) {
   });
   if (rateLimitResponse) return rateLimitResponse;
 
+  if (shouldFailClosedWhenRestMissing()) {
+    return Response.json(
+      {
+        configured: false,
+        code: "rest_not_configured",
+        error: "学校データ取得設定が未完了のため、教員向け集計を停止しています。",
+      },
+      { status: 503 },
+    );
+  }
+
   if (!isRestConfigured()) {
     return Response.json({
       configured: false,
@@ -69,7 +80,7 @@ export async function GET(request) {
   try {
     const schoolId = encodeURIComponent(context.session.schoolId);
     const [profiles, generations, feedback] = await Promise.all([
-      supabaseRestFetch(`/profiles?select=id,role,display_name,email,class_id&school_id=eq.${schoolId}&order=created_at.desc&limit=500`),
+      supabaseRestFetch(`/profiles?select=id,role,display_name,class_id&school_id=eq.${schoolId}&order=created_at.desc&limit=500`),
       supabaseRestFetch(`/generation_logs?select=id,kind,input,output,checks,session,status,created_at,user_id&school_id=eq.${schoolId}&order=created_at.desc&limit=80`),
       supabaseRestFetch(`/feedback_logs?select=id,created_at,user_id,kind,feedback&school_id=eq.${schoolId}&order=created_at.desc&limit=200`),
     ]);
@@ -150,10 +161,15 @@ function formatProfile(profile) {
     id: profile.id,
     role: profile.role,
     roleLabel: profile.role === "teacher" ? "教員" : profile.role === "admin" ? "管理者" : "学生",
-    name: profile.display_name,
-    email: profile.email,
+    name: safeStudentDisplayName(profile.display_name),
     classId: profile.class_id,
   };
+}
+
+function safeStudentDisplayName(value) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return "学生";
+  return text.slice(0, 80);
 }
 
 function buildReviewQueue(logs) {
@@ -192,7 +208,7 @@ function formatReviewItem(log, tag, title, detail) {
     detail,
     kind: log.kind,
     createdAt: log.created_at,
-    studentName: log.session?.userName || log.session?.name || "学生",
+    studentName: safeStudentDisplayName(log.session?.userName || log.session?.name),
     log: logPreview,
   };
 }
@@ -255,7 +271,7 @@ function formatLog(log) {
     kind: log.kind,
     status: log.status,
     createdAt: log.created_at,
-    studentName: log.session?.userName || log.session?.name || "学生",
+    studentName: safeStudentDisplayName(log.session?.userName || log.session?.name),
     className: log.session?.className || "",
     inputPreview: buildInputPreview(log.input),
     outputPreview: checks[0] || headings.join(" / "),
@@ -345,8 +361,7 @@ function buildStudentUsage(profiles, logs) {
       profile.id,
       {
         id: profile.id,
-        name: profile.display_name || profile.email || "学生",
-        email: profile.email || "",
+        name: safeStudentDisplayName(profile.display_name),
         generations: 0,
         diary: 0,
         plan: 0,
@@ -357,12 +372,11 @@ function buildStudentUsage(profiles, logs) {
   );
 
   for (const log of logs) {
-    const id = log.user_id || log.session?.userId || log.session?.email || log.id;
+    const id = log.user_id || log.session?.userId || log.id;
     if (!byUser.has(id)) {
       byUser.set(id, {
         id,
-        name: log.session?.userName || log.session?.name || "学生",
-        email: "",
+        name: safeStudentDisplayName(log.session?.userName || log.session?.name),
         generations: 0,
         diary: 0,
         plan: 0,
