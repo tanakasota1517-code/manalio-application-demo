@@ -2,6 +2,7 @@
 .env.local
 node_modules/
 .next/
+.vercel/
 out/
 outputs/
 .DS_Store

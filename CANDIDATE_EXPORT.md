@@ -45,4 +45,4 @@ If `npm run build` creates `.next/`, do not upload this folder as a zip or via G
 
 Stop if any internal notes, teacher-review URLs, login credentials, passwords, real school data, `.env.local`, or archived work logs appear.
 
-Generated path: outputs/application-github-candidate-2026-06-09T15-23-39-369Z
+Generated path: outputs/application-github-candidate-2026-06-09T15-45-52-237Z

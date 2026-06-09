@@ -3074,17 +3074,17 @@ function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
       <div className="toolbar">
         <div>
           <span className="label">確認レビュー</span>
-          <h2>必要な候補だけを確認し、面談につなげる</h2>
+          <h2>必要な候補だけを確認し、学生への声かけに使う</h2>
         </div>
         <span className="badge">{schoolSummary?.configured ? "確認記録" : "参考表示"}</span>
       </div>
 
       <div className="school-dashboard">
-        <section className="review-command-strip" aria-label="確認レビューの現在地">
+        <section className="review-command-strip" aria-label="確認レビューの表示対象">
           <div>
-            <span className="label">現在の確認範囲</span>
+            <span className="label">表示中の候補</span>
             <strong>{visibleQueueLabel}</strong>
-            <p>{filteredQueue.length}件を表示中。まず当日確認だけを見て、授業共有と学生本人への返却は必要な時に切り替えます。</p>
+            <p>{filteredQueue.length}件を表示中。全件添削ではなく、気になる候補から学生への声かけや授業共有に使います。</p>
           </div>
           <div className="review-command-stats">
             <span>当日確認 {workloadPlan.reviewNowCount}</span>
