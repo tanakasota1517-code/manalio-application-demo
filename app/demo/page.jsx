@@ -1,4 +1,3 @@
-import { PublicFooter, PublicHeader } from "../site-components";
 import { DemoServiceExperience } from "./demo-service-experience";
 
 export const metadata = {
@@ -15,16 +14,16 @@ export const metadata = {
 
 const demoPoints = [
   {
-    title: "学生が自分の観察を整理する",
-    body: "見たこと、自分の考え、実習先で受けた助言を分けて入力し、記録にする前の材料を整えます。",
+    title: "学校フォーマットに沿って学生が書く",
+    body: "目標の振り返り、エピソード、気づき、次の日取り組みたいことを、学校ごとの日誌様式に近い形で整理します。",
   },
   {
-    title: "AIは完成文ではなく問いを返す",
-    body: "日誌を代筆せず、学生がもう一度考えるための問い、確認候補、翌日の観察観点を返します。",
+    title: "叩き台と見比べて、自分で直す",
+    body: "完成文を渡すのではなく、元の記録とAIの叩き台を横に置き、学生が自分の言葉で直すための材料を返します。",
   },
   {
     title: "教員は指導材料として見る",
-    body: "全件添削や成績判定ではなく、学生への声かけや授業共有に使える候補を確認します。",
+    body: "学生への声かけ、授業共有、自己確認へ戻す候補を分け、確認作業を支援に使いやすい形へ整理します。",
   },
 ];
 
@@ -32,7 +31,7 @@ export default function DemoPage() {
   return (
     <main id="main-content" className="site-root">
       <section className="site-shell site-subpage">
-        <PublicHeader />
+        <DemoHeader />
 
         <section className="detail-hero demo-hero">
           <div className="demo-hero-copy">
@@ -40,11 +39,14 @@ export default function DemoPage() {
             <h1>観察を記録に。記録を学びに。</h1>
             <p>
               Manalioは、保育者養成校向けのAI実習支援SaaSです。
-              学生が書いた観察と振り返りをもとに、提出前の気づき、問い返し、翌日の観察観点、教員が確認する指導材料へつなげます。
+              学生が学校の日誌様式に沿って書いた観察と振り返りをもとに、提出前の安全確認、叩き台との比較、翌日の観察観点、教員が確認する指導材料へつなげます。
+            </p>
+            <p className="demo-hero-note">
+              架空の実習場面で、学生画面と教員画面の流れをそのまま試せます。
             </p>
             <div className="site-hero-actions">
               <a className="site-primary" href="#service-demo">サービス画面を試す</a>
-              <a className="site-secondary" href="/product">機能を見る</a>
+              <a className="site-secondary" href="/demo/student">学生画面を開く</a>
             </div>
           </div>
           <div className="demo-hero-visual" aria-label="Manalioの体験イメージ">
@@ -53,9 +55,9 @@ export default function DemoPage() {
               alt="実習記録を整理する学生のイラスト"
             />
             <div className="demo-hero-flow" aria-label="デモで触れる流れ">
-              <span>学生入力</span>
-              <span>提出前の気づき</span>
-              <span>問い返し</span>
+              <span>学校フォーマット</span>
+              <span>安全確認</span>
+              <span>叩き台比較</span>
               <span>教員確認</span>
             </div>
           </div>
@@ -83,15 +85,50 @@ export default function DemoPage() {
             <span className="site-kicker">次に見るところ</span>
             <h2>学生画面だけでなく、学校として説明できるAI利用にする。</h2>
             <p>
-              Manalioは、入力、問い返し、安全確認、教員確認、学校フォーマット対応までを一つの流れとして扱います。
+              Manalioは、学校フォーマットへの入力、安全確認、叩き台比較、教員確認までを一つの流れとして扱います。
               まずは小さなクラス単位で、どの情報を保存し、誰が見られるかを確認しながら導入します。
             </p>
           </div>
-          <a className="site-primary" href="/governance">安全性を見る</a>
+          <a className="site-primary" href="/demo/teacher">教員画面を開く</a>
         </section>
 
-        <PublicFooter />
+        <DemoFooter />
       </section>
     </main>
+  );
+}
+
+function DemoHeader() {
+  return (
+    <header className="site-header">
+      <a className="site-brand" href="/demo">
+        <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
+        <span className="site-brand-caption">保育実習の省察支援</span>
+      </a>
+      <nav className="site-nav" aria-label="公開デモ">
+        <a href="#demo-points-heading">Manalioの核</a>
+        <a href="#service-demo">サービス画面</a>
+        <a href="/demo/student">学生画面</a>
+        <a href="/demo/teacher">教員画面</a>
+      </nav>
+      <a className="site-header-cta" href="#service-demo">デモを試す</a>
+    </header>
+  );
+}
+
+function DemoFooter() {
+  return (
+    <footer className="site-footer" aria-label="公開デモ情報">
+      <a className="site-brand" href="/demo">
+        <img className="site-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
+        <span className="site-brand-caption">保育実習の省察支援</span>
+      </a>
+      <nav aria-label="公開デモ内リンク">
+        <a href="/demo/student">学生画面</a>
+        <a href="/demo/teacher">教員画面</a>
+        <a href="#service-demo">流れを見る</a>
+      </nav>
+      <p>Copyright © Manalio</p>
+    </footer>
   );
 }

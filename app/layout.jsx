@@ -4,6 +4,7 @@ import PwaRegister from "./pwa-register";
 
 const siteTitle = "Manalio | 保育者養成校向けAI実習指導支援";
 const siteDescription = "保育実習の日誌づくりを、学校フォーマット、確認候補、教員が確認するポイントとともに安全に扱えるAI実習指導支援プラットフォームです。";
+const isPublicDemoOnly = process.env["MANABI_PUBLIC_DEMO_ONLY"] === "true";
 
 export const metadata = {
   metadataBase: new URL(SITE_URL),
@@ -11,7 +12,7 @@ export const metadata = {
   title: siteTitle,
   description: siteDescription,
   keywords: ["保育実習", "実習日誌", "保育者養成校", "AI実習指導", "実習指導"],
-  manifest: "/manifest.webmanifest",
+  ...(isPublicDemoOnly ? {} : { manifest: "/manifest.webmanifest" }),
   icons: {
     icon: [
       { url: "/images/brand-icon.svg", type: "image/svg+xml" },
@@ -50,8 +51,8 @@ export const metadata = {
     images: ["/images/manalio-hero-photo.jpg"],
   },
   robots: {
-    index: true,
-    follow: true,
+    index: !isPublicDemoOnly,
+    follow: !isPublicDemoOnly,
   },
 };
 
@@ -85,11 +86,13 @@ export default function RootLayout({ children }) {
       <body>
         <a className="skip-link" href="#main-content">本文へスキップ</a>
         {children}
-        <PwaRegister />
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify([websiteJsonLd, softwareJsonLd]) }}
-        />
+        {!isPublicDemoOnly ? <PwaRegister /> : null}
+        {!isPublicDemoOnly ? (
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{ __html: JSON.stringify([websiteJsonLd, softwareJsonLd]) }}
+          />
+        ) : null}
       </body>
     </html>
   );

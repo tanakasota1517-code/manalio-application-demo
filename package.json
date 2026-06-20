@@ -4,9 +4,9 @@
   "private": true,
   "description": "Public Manalio prototype cutout for BootCamp review",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node scripts/run-public-demo-command.mjs dev",
+    "build": "node scripts/run-public-demo-command.mjs build",
+    "start": "node scripts/run-public-demo-command.mjs start",
     "check": "node scripts/check-api-syntax.mjs",
     "audit:secrets": "node scripts/audit-secrets.mjs"
   },

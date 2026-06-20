@@ -7,7 +7,19 @@ const NO_STORE_HEADERS = {
 };
 const privatePagePrefixes = ["/login", "/app"];
 const publicDemoBlockedPrefixes = ["/workspace"];
+const publicDemoRedirectPagePrefixes = [
+  "/",
+  "/product",
+  "/governance",
+  "/evidence",
+  "/pilot",
+  "/terms",
+  "/privacy",
+  "/commercial-transactions",
+];
+const publicDemoRedirectStaticPaths = ["/offline.html", "/sw.js"];
 const publicDemoBlockedApiPrefixes = [
+  "/api/health",
   "/api/workspace",
   "/api/auth",
   "/api/generate",
@@ -16,7 +28,7 @@ const publicDemoBlockedApiPrefixes = [
   "/api/logs",
   "/api/demo/access",
 ];
-const publicDemoAllowedPrefixes = ["/demo/student", "/demo/teacher"];
+const publicDemoAllowedPaths = ["/demo", "/demo/student", "/demo/teacher"];
 
 export function proxy(request) {
   const headers = {};
@@ -26,17 +38,20 @@ export function proxy(request) {
   const isPublicDemoBlockedPath = publicDemoBlockedPrefixes.some(
     (prefix) => request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(`${prefix}/`),
   );
+  const isPublicDemoRedirectPagePath = publicDemoRedirectPagePrefixes.some((prefix) => {
+    if (prefix === "/") return request.nextUrl.pathname === "/";
+    return request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(`${prefix}/`);
+  });
+  const isPublicDemoRedirectStaticPath = publicDemoRedirectStaticPaths.includes(request.nextUrl.pathname);
   const isPublicDemoBlockedApiPath = publicDemoBlockedApiPrefixes.some(
     (prefix) => request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(`${prefix}/`),
   );
-  const isPublicDemoAllowedPath = publicDemoAllowedPrefixes.some(
-    (prefix) => request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(`${prefix}/`),
-  );
+  const isPublicDemoAllowedPath = publicDemoAllowedPaths.includes(request.nextUrl.pathname);
   if (isPrivatePage) {
     Object.assign(headers, NO_STORE_HEADERS);
   }
 
-  if (isPublicDemoOnly() && !isPublicDemoAllowedPath && (isPrivatePage || isPublicDemoBlockedPath)) {
+  if (isPublicDemoOnly() && !isPublicDemoAllowedPath && (isPrivatePage || isPublicDemoBlockedPath || isPublicDemoRedirectPagePath || isPublicDemoRedirectStaticPath)) {
     const url = request.nextUrl.clone();
     url.pathname = "/demo";
     url.search = "";
@@ -80,8 +95,27 @@ export const config = {
     "/login/:path*",
     "/app",
     "/app/:path*",
+    "/",
+    "/product",
+    "/product/:path*",
+    "/governance",
+    "/governance/:path*",
+    "/evidence",
+    "/evidence/:path*",
+    "/pilot",
+    "/pilot/:path*",
+    "/terms",
+    "/terms/:path*",
+    "/privacy",
+    "/privacy/:path*",
+    "/commercial-transactions",
+    "/commercial-transactions/:path*",
+    "/offline.html",
+    "/sw.js",
     "/workspace",
     "/workspace/:path*",
+    "/api/health",
+    "/api/health/:path*",
     "/api/workspace",
     "/api/workspace/:path*",
     "/api/auth",

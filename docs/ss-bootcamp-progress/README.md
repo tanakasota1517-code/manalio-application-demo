@@ -7,7 +7,7 @@ Manalio is a public prototype for childcare teacher training schools. These note
 ## How To Read
 
 - `weekly-updates/` contains short weekly progress notes.
-- Latest: `weekly-updates/2026-W23.md`
+- Latest: `weekly-updates/2026-W24.md`
 - Each note focuses on product progress, safety decisions, validation learning, and the next concrete step.
 - Internal runbooks, limited-review access details, private environment values, and real-world case details are intentionally excluded.
 

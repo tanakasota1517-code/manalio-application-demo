@@ -40,6 +40,8 @@ Open:
 
 The `/demo` route is the safest first screen for reviewers because it is read-only and uses fictional sample data.
 
+The public cutout runs in demo-only mode by default. `npm run dev`, `npm run build`, and `npm run start` go through `scripts/run-public-demo-command.mjs`, which forces `MANABI_PUBLIC_DEMO_ONLY=true`, mock data, disabled Supabase access, disabled public signup, and no reviewer shortcut UI. Do not replace these scripts with raw `next dev`, `next build`, or `next start` before public sharing.
+
 ## Checks
 
 Before sharing this public cutout, run these commands in the public repository:
@@ -47,6 +49,7 @@ Before sharing this public cutout, run these commands in the public repository:
     npm run check
     npm run audit:secrets
     npm run build
+    npm run start
 
 In the private working repository, also run the broader pre-export checks before creating this cutout:
 

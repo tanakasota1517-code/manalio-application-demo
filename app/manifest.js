@@ -1,4 +1,56 @@
 export default function manifest() {
+  if (isPublicDemoOnly()) {
+    return {
+      id: "/demo",
+      name: "Manalio 公開デモ",
+      short_name: "Manalio",
+      description: "保育者養成校向けAI実習支援の公開デモ",
+      lang: "ja-JP",
+      start_url: "/demo",
+      scope: "/demo",
+      display: "browser",
+      background_color: "#ffffff",
+      theme_color: "#183B6B",
+      orientation: "portrait-primary",
+      categories: ["education", "productivity"],
+      icons: [
+        {
+          src: "/images/brand-icon.svg",
+          sizes: "any",
+          type: "image/svg+xml",
+        },
+        {
+          src: "/images/app-icon-192.png",
+          sizes: "192x192",
+          type: "image/png",
+          purpose: "any",
+        },
+        {
+          src: "/images/app-icon-512.png",
+          sizes: "512x512",
+          type: "image/png",
+          purpose: "any",
+        },
+      ],
+      shortcuts: [
+        {
+          name: "学生画面デモ",
+          short_name: "学生デモ",
+          description: "架空データで学生画面を開く",
+          url: "/demo/student",
+          icons: [{ src: "/images/app-icon-192.png", sizes: "192x192" }],
+        },
+        {
+          name: "教員画面デモ",
+          short_name: "教員デモ",
+          description: "架空データで教員画面を開く",
+          url: "/demo/teacher",
+          icons: [{ src: "/images/app-icon-192.png", sizes: "192x192" }],
+        },
+      ],
+    };
+  }
+
   return {
     id: "/",
     name: "Manalio",
@@ -55,4 +107,8 @@ export default function manifest() {
       },
     ],
   };
+}
+
+function isPublicDemoOnly() {
+  return process.env["MANABI_PUBLIC_DEMO_ONLY"] === "true";
 }

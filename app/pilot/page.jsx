@@ -93,7 +93,7 @@ export default function PilotPage() {
             <article>
               <span>02</span>
               <strong>教員負担</strong>
-              <p>教員が毎日全件を見る運用にならず、面談で使える論点だけを確認できるかを見ます。</p>
+              <p>教員が毎日全件を見る運用にならず、授業共有や個別確認に使える論点だけを確認できるかを見ます。</p>
             </article>
             <article>
               <span>03</span>
