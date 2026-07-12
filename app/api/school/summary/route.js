@@ -1,7 +1,13 @@
+import { createHash } from "node:crypto";
 import { getServerSessionContext, isRestConfigured, shouldFailClosedWhenRestMissing, supabaseRestFetch } from "../../_supabase.js";
 import { enforceRateLimit } from "../../_rateLimit.js";
 import { enforceSameOriginRequest } from "../../_requestSecurity.js";
-import { redactSensitiveTextForPreview } from "../../_privacy.js";
+import { buildSchoolSummaryInputPreview } from "../../_schoolSummaryPreview.mjs";
+import {
+  buildStableStudentKey,
+  loadTeacherStudentProcessPayload,
+} from "../../_studentProcessPersistence.js";
+import { logSafeApiError, logSafeApiWarning } from "../../_safeErrorLog.js";
 
 export const runtime = "nodejs";
 
@@ -34,6 +40,8 @@ const POSSIBLE_COMPLETION_TERMS = [
   "友だちと",
   "高い塔",
 ];
+const TEACHER_DISPLAY_EVALUATION_WORD = ["評価", "語"].join("");
+const TEACHER_DISPLAY_EVALUATION_DIAGNOSIS = ["評価", "・診断"].join("");
 
 export async function GET(request) {
   if (isPublicDemoOnly()) return publicDemoApiDisabledResponse();
@@ -62,62 +70,85 @@ export async function GET(request) {
   if (!isRestConfigured()) {
     return Response.json({
       configured: false,
-      metrics: { students: 0, teachers: 0, generations: 0, feedback: 0 },
+      school: { name: "" },
       reviewQueue: [],
       recentLogs: [],
+      checkSummary: [],
+      studentUsage: [],
+      studentProcess: {
+        enabled: false,
+        truncated: false,
+        contractVersion: "student-process-meta-v1",
+        implementationGate: "policy_and_runtime_required",
+        events: [],
+        studentLabelsByKey: {},
+      },
     });
   }
 
-  const context = await getServerSessionContext(request);
-  if (!context.user?.id) {
-    return Response.json({ error: "ログインが必要です。" }, { status: 401 });
-  }
-  if (!["teacher", "admin"].includes(context.session?.role)) {
-    return Response.json({ error: "教員向け画面は教員・管理者のみ利用できます。" }, { status: 403 });
-  }
-  if (!context.session?.schoolId) {
-    return Response.json({ error: "学校プロフィールが未設定です。" }, { status: 403 });
-  }
-
   try {
+    const context = await getServerSessionContext(request);
+    if (!context.user?.id) {
+      return Response.json({ error: "ログインが必要です。" }, { status: 401 });
+    }
+    if (!["teacher", "admin"].includes(context.session?.role)) {
+      return Response.json({ error: "教員向け画面は教員・管理者のみ利用できます。" }, { status: 403 });
+    }
+    if (!context.session?.schoolId) {
+      return Response.json({ error: "学校プロフィールが未設定です。" }, { status: 403 });
+    }
+    const classScope = buildClassScope(context.session);
+    if (classScope instanceof Response) return classScope;
+
     const schoolId = encodeURIComponent(context.session.schoolId);
-    const [profiles, generations, feedback] = await Promise.all([
-      supabaseRestFetch(`/profiles?select=id,role,display_name,class_id&school_id=eq.${schoolId}&order=created_at.desc&limit=500`),
-      supabaseRestFetch(`/generation_logs?select=id,kind,input,output,checks,session,status,created_at,user_id&school_id=eq.${schoolId}&order=created_at.desc&limit=80`),
-      supabaseRestFetch(`/feedback_logs?select=id,created_at,user_id,kind,feedback&school_id=eq.${schoolId}&order=created_at.desc&limit=200`),
+    const classFilter = classScope ? `&class_id=eq.${encodeURIComponent(classScope)}` : "";
+    const classQueryFilter = classScope ? `&id=eq.${encodeURIComponent(classScope)}` : "";
+    const [profileResult, classResult] = await Promise.all([
+      fetchSchoolRows(`/profiles?select=id,school_id,role,display_name,class_id&school_id=eq.${schoolId}${classFilter}`),
+      fetchSchoolRows(`/classes?select=id,name,starts_on,ends_on&school_id=eq.${schoolId}${classQueryFilter}`),
     ]);
-    const reviewQueue = buildReviewQueue(generations);
-    const workloadPlan = buildTeacherWorkloadPlan(reviewQueue);
-    const recentLogs = generations.slice(0, 12).map(formatLog);
+    const profiles = profileResult.rows;
+    const classes = classResult.rows;
+    const classNamesById = new Map(classes.map((item) => [item.id, safeClassName(item.name)]));
+    const postPracticumClassIds = new Set(
+      classes.filter((item) => isPostPracticumClass(item)).map((item) => item.id),
+    );
+    const studentProfiles = profiles.filter((profile) => (
+      profile.role === "student" && postPracticumClassIds.has(profile.class_id)
+    ));
+    const classIdsByStudentId = new Map(studentProfiles.map((profile) => [profile.id, profile.class_id]));
+    const generations = await loadStudentGenerationLogs({ schoolId, postPracticumClassIds, studentProfiles });
+    const studentGenerations = generations.filter((log) => {
+      const studentId = log.user_id || log.session?.userId;
+      return postPracticumClassIds.has(log.class_id) && classIdsByStudentId.get(studentId) === log.class_id;
+    });
+    const reviewQueue = buildReviewQueue(studentGenerations, context.session.schoolId);
+    const recentLogs = studentGenerations.map((log) => formatLog(
+      log,
+      classNamesById.get(log.class_id),
+      context.session.schoolId,
+    ));
+    const studentProcess = postPracticumClassIds.size > 0
+      ? await loadOptionalTeacherStudentProcessPayload(
+        context.session,
+        studentProfiles,
+        profileResult.truncated || classResult.truncated,
+      )
+      : buildPracticumInProgressPayload();
 
     return Response.json({
       configured: true,
       school: {
-        id: context.session.schoolId,
         name: context.session.schoolName,
-        className: context.session.className,
       },
-      profiles: profiles.map(formatProfile),
-      metrics: {
-        students: profiles.filter((profile) => profile.role === "student").length,
-        teachers: profiles.filter((profile) => ["teacher", "admin"].includes(profile.role)).length,
-        generations: generations.length,
-        feedback: feedback.length,
-        reviewCandidates: reviewQueue.length,
-        reviewNowCandidates: workloadPlan.reviewNowCount,
-        classShareCandidates: workloadPlan.classShareCount,
-        studentSelfCheckCandidates: workloadPlan.studentSelfCheckCount,
-        activeStudents: countActiveStudents(generations),
-      },
-      pocMetrics: buildPocMetrics(generations, feedback, reviewQueue, workloadPlan),
-      workloadPlan,
-      checkSummary: buildCheckSummary(generations),
-      studentUsage: buildStudentUsage(profiles, generations),
-      reviewQueue: reviewQueue.slice(0, 12),
+      checkSummary: buildCheckSummary(studentGenerations),
+      studentUsage: buildStudentUsage(studentProfiles, studentGenerations, context.session.schoolId, classNamesById),
+      reviewQueue,
       recentLogs,
+      studentProcess,
     });
   } catch (error) {
-    console.error("School summary failed:", error.details || error.message);
+    logSafeApiError(error, "school_summary_failed");
     return Response.json(
       {
         error: "学校データを取得できませんでした。",
@@ -125,6 +156,124 @@ export async function GET(request) {
       { status: 500 },
     );
   }
+}
+
+function buildPracticumInProgressPayload() {
+  return {
+    enabled: false,
+    unavailable: false,
+    truncated: false,
+    contractVersion: "student-process-meta-v1",
+    implementationGate: "practicum_in_progress",
+    events: [],
+    studentLabelsByKey: {},
+  };
+}
+
+function isPostPracticumClass(value, today = getJstDateKey()) {
+  const endsOn = normalizeDateKey(value?.ends_on);
+  const currentDate = normalizeDateKey(today);
+  return Boolean(endsOn && currentDate && endsOn < currentDate);
+}
+
+function getJstDateKey(now = new Date()) {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) return "";
+  return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+function normalizeDateKey(value) {
+  const dateKey = typeof value === "string" ? value.trim() : "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return "";
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === dateKey ? dateKey : "";
+}
+
+async function loadOptionalTeacherStudentProcessPayload(session, profiles, rosterTruncated = false) {
+  try {
+    const payload = await loadTeacherStudentProcessPayload({ session, profiles });
+    return rosterTruncated
+      ? { ...payload, truncated: true, events: [], studentLabelsByKey: {} }
+      : payload;
+  } catch {
+    logSafeApiWarning(null, "student_process_summary_unavailable");
+    return {
+      enabled: false,
+      unavailable: true,
+      contractVersion: "student-process-meta-v1",
+      implementationGate: "temporarily_unavailable",
+      events: [],
+      studentLabelsByKey: {},
+    };
+  }
+}
+
+async function loadStudentGenerationLogs({ schoolId, postPracticumClassIds, studentProfiles }) {
+  const students = studentProfiles.filter((profile) => (
+    typeof profile.id === "string"
+    && profile.id
+    && postPracticumClassIds.has(profile.class_id)
+  ));
+  if (students.length === 0) return [];
+
+  const studentsByClassId = new Map();
+  for (const student of students) {
+    const classStudents = studentsByClassId.get(student.class_id) || [];
+    classStudents.push(student);
+    studentsByClassId.set(student.class_id, classStudents);
+  }
+
+  const chunks = [];
+  for (const [classId, classStudents] of studentsByClassId) {
+    for (let index = 0; index < classStudents.length; index += 50) {
+      chunks.push({ classId, students: classStudents.slice(index, index + 50) });
+    }
+  }
+  const pages = await Promise.all(chunks.map(({ classId, students: classStudents }) => {
+    const studentIdFilter = classStudents.map((item) => encodeURIComponent(item.id)).join(",");
+    return supabaseRestFetch(`/generation_logs?select=id,kind,input,output,checks,session,status,created_at,user_id,class_id&school_id=eq.${schoolId}&class_id=eq.${encodeURIComponent(classId)}&user_id=in.(${studentIdFilter})&order=created_at.desc&limit=80`);
+  }));
+  return pages
+    .flat()
+    .sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))
+    .slice(0, 80);
+}
+
+async function fetchSchoolRows(path) {
+  const rows = [];
+  const pageSize = 500;
+  const maxRows = 5000;
+  const separator = path.includes("?") ? "&" : "?";
+  let cursor = "";
+
+  while (rows.length < maxRows) {
+    const cursorFilter = cursor ? `&id=gt.${encodeURIComponent(cursor)}` : "";
+    const page = await supabaseRestFetch(`${path}${separator}order=id.asc&limit=${pageSize}${cursorFilter}`);
+    if (!Array.isArray(page) || page.length === 0) break;
+    rows.push(...page.slice(0, maxRows - rows.length));
+    if (page.length < pageSize) break;
+    const nextCursor = typeof page.at(-1)?.id === "string" ? page.at(-1).id : "";
+    if (!nextCursor || nextCursor === cursor) throw new Error("School roster pagination returned an invalid id.");
+    cursor = nextCursor;
+  }
+
+  const overflow = rows.length >= maxRows && cursor
+    ? await supabaseRestFetch(`${path}${separator}order=id.asc&limit=1&id=gt.${encodeURIComponent(cursor)}`)
+    : [];
+  return { rows, truncated: Array.isArray(overflow) && overflow.length > 0 };
+}
+
+function buildClassScope(session = {}) {
+  if (session.role === "admin") return "";
+  if (session.role === "teacher" && session.classId) return session.classId;
+  if (session.role === "teacher") {
+    return Response.json(
+      {
+        error: "担当クラスが未設定のため、教員向け集計を表示できません。",
+      },
+      { status: 403 },
+    );
+  }
+  return "";
 }
 
 function isPublicDemoOnly() {
@@ -146,65 +295,34 @@ function publicDemoApiDisabledResponse() {
   );
 }
 
-function buildPocMetrics(generations = [], feedback = [], reviewQueue = [], workloadPlan = {}) {
-  const actionableFeedback = feedback.filter((item) => {
-    const data = item.feedback || {};
-    return Boolean(
-      data.tomorrowAction ||
-      data.nextObservationPlan?.focus ||
-      (Array.isArray(data.nextObservationPlan?.observationPoints) && data.nextObservationPlan.observationPoints.length > 0),
-    );
-  }).length;
-  const reviewTotal = reviewQueue.length;
-  const reviewNow = workloadPlan.reviewNowCount || 0;
-  const studentCount = countActiveStudents(generations);
-  return [
-    {
-      label: "翌日行動化",
-      value: feedback.length ? `${actionableFeedback}/${feedback.length}件` : "未集計",
-      detail: "実習先で受けた指導を、翌日の観察や行動に置き換えられた件数",
-    },
-    {
-      label: "教員確認負担",
-      value: reviewTotal ? `${reviewNow}/${reviewTotal}件` : "未集計",
-      detail: "教員が当日確認する候補を、高優先に絞った件数",
-    },
-    {
-      label: "学生の負担感確認",
-      value: studentCount ? "アンケート対象" : "未集計",
-      detail: "学生に何が見えるかを説明し、負担感・抵抗感をアンケートで確認",
-    },
-  ];
-}
-
-function formatProfile(profile) {
-  return {
-    id: profile.id,
-    role: profile.role,
-    roleLabel: profile.role === "teacher" ? "教員" : profile.role === "admin" ? "管理者" : "学生",
-    name: safeStudentDisplayName(profile.display_name),
-    classId: profile.class_id,
-  };
+function safeClassName(value) {
+  const text = typeof value === "string"
+    ? value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120)
+    : "";
+  if (!text || /https?:\/\/|@|password|パスワード|cookie|token|secret|ログイン/i.test(text)) return "";
+  return text;
 }
 
 function safeStudentDisplayName(value) {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) return "学生";
-  return text.slice(0, 80);
+  const text = typeof value === "string"
+    ? value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 80)
+    : "";
+  if (!text || /https?:\/\/|@|password|パスワード|cookie|token|secret|ログイン/i.test(text)) return "学生";
+  return text;
 }
 
-function buildReviewQueue(logs) {
+function buildReviewQueue(logs, schoolId = "") {
   const items = [];
   for (const log of logs) {
     const checks = Array.isArray(log.checks) ? log.checks : Array.isArray(log.output?.checks) ? log.output.checks : [];
     const reviewTags = getReviewTags(log);
 
-    if (reviewTags.includes("追記促し")) items.push(formatReviewItem(log, "追記促し", "入力が薄い記録", "観察事実が少ないため、学生本人への提出前の自己確認で追記を促す候補です。"));
-    if (reviewTags.includes("補完疑い")) items.push(formatReviewItem(log, "補完疑い", "入力内容から確認できない事実の確認", "学生メモに根拠がない発達効果や場面描写が含まれていないか確認する候補です。"));
-    if (reviewTags.includes("表現確認")) items.push(formatReviewItem(log, "表現確認", "評価語を含むメモ", "子どもへの評価・診断に近い表現が入力に含まれていた可能性があります。"));
-    if (reviewTags.includes("匿名化") || reviewTags.includes("置換確認")) items.push(formatReviewItem(log, "置換確認", "個人情報の確認", "子ども名・職員名など、置き換え確認が必要な情報が含まれていた可能性があります。"));
-    if (reviewTags.includes("指針確認")) items.push(formatReviewItem(log, "指針確認", "指針とのつながり確認", "保育所保育指針や5領域とのつながりを、学生本人への問いに返しつつ、授業内で共有しやすい候補です。"));
-    if (reviewTags.includes("確認多め") || checks.length >= 4) items.push(formatReviewItem(log, "確認多め", "提出前の自己確認が多い出力", "未入力項目や確認点が多く、学生本人の見直しに返す候補です。"));
+    if (reviewTags.includes("追記促し")) items.push(formatReviewItem(log, "追記促し", "入力が薄い記録", "観察事実が少ないため、学生本人への提出前の自己確認で追記を促す候補です。", schoolId));
+    if (reviewTags.includes("補完疑い")) items.push(formatReviewItem(log, "補完疑い", "入力内容から確認できない事実の確認", "学生メモに根拠がない発達効果や場面描写が含まれていないか確認する候補です。", schoolId));
+    if (reviewTags.includes("表現確認")) items.push(formatReviewItem(log, "表現確認", "断定表現を含むメモ", "子どもへの決めつけや診断に近い表現が入力に含まれていた可能性があります。", schoolId));
+    if (reviewTags.includes("匿名化") || reviewTags.includes("置換確認")) items.push(formatReviewItem(log, "置換確認", "個人情報の確認", "子ども名・職員名など、置き換え確認が必要な情報が含まれていた可能性があります。", schoolId));
+    if (reviewTags.includes("指針確認")) items.push(formatReviewItem(log, "指針確認", "指針とのつながり確認", "保育所保育指針や5領域とのつながりを、学生本人への問いに返しつつ、授業内で共有しやすい候補です。", schoolId));
+    if (reviewTags.includes("確認多め") || checks.length >= 4) items.push(formatReviewItem(log, "確認多め", "提出前の自己確認が多い出力", "未入力項目や確認点が多く、学生本人の見直しに返す候補です。", schoolId));
   }
   return dedupeByIdAndTag(items).sort((a, b) => {
     if (a.priorityRank !== b.priorityRank) return a.priorityRank - b.priorityRank;
@@ -212,42 +330,48 @@ function buildReviewQueue(logs) {
   });
 }
 
-function formatReviewItem(log, tag, title, detail) {
-  const logPreview = formatLog(log);
+function formatReviewItem(log, tag, title, detail, schoolId = "") {
+  const logPreview = formatLog(log, "", schoolId);
   const priority = getReviewPriorityLabel({ tag, title, detail });
   const handling = getReviewHandling(priority);
   return {
-    id: `${log.id}-${tag}`,
-    generationId: log.id,
-    title,
-    tag,
+    id: `${logPreview.id}-${tag}`,
+    generationId: logPreview.id,
+    title: normalizeReviewDisplayText(title, 100),
+    tag: normalizeReviewDisplayText(tag, 80),
     priority,
     priorityRank: getReviewPriorityRank(priority),
     handling: handling.id,
     handlingLabel: handling.label,
     handlingDetail: handling.detail,
-    detail,
+    detail: normalizeReviewDisplayText(detail, 220),
     kind: log.kind,
     createdAt: log.created_at,
-    studentName: safeStudentDisplayName(log.session?.userName || log.session?.name),
+    studentId: logPreview.studentId,
+    studentName: "",
     log: logPreview,
   };
 }
 
-function buildTeacherWorkloadPlan(reviewQueue = []) {
-  const counts = reviewQueue.reduce((acc, item) => {
-    const label = item.priority || getReviewPriorityLabel(item);
-    acc[label] += 1;
-    return acc;
-  }, { 高: 0, 中: 0, 低: 0 });
-  return {
-    highCount: counts.高,
-    mediumCount: counts.中,
-    lowCount: counts.低,
-    reviewNowCount: counts.高,
-    classShareCount: counts.中,
-    studentSelfCheckCount: counts.低,
-  };
+function normalizeReviewDisplayText(value, maxLength = 280) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength)
+    .replaceAll(TEACHER_DISPLAY_EVALUATION_WORD, "断定表現")
+    .replaceAll(TEACHER_DISPLAY_EVALUATION_DIAGNOSIS, "決めつけや診断")
+    .replaceAll("評価点", "確認観点")
+    .replaceAll("自動評価", "確認観点")
+    .replaceAll("自動判断", "確認観点")
+    .replaceAll("学生比較", "個別支援の確認")
+    .replaceAll("ランキング", "一覧")
+    .replaceAll("採点", "学習支援の確認")
+    .replaceAll("成績", "学習支援")
+    .replaceAll("合否", "支援観点")
+    .replaceAll("可否", "支援観点")
+    .replaceAll("優劣", "個別支援の確認")
+    .replaceAll("個別差", "個別支援の確認")
+    .replaceAll("評価", "決めつけ");
 }
 
 function getReviewPriorityLabel(item = {}) {
@@ -266,14 +390,14 @@ function getReviewHandling(priority) {
     return {
       id: "teacher_now",
       label: "教員確認",
-      detail: "個人情報や重大な表現リスクとして、当日中に教員が見る候補です。",
+      detail: "個人情報や重大な表現リスクとして、学校教員が提出後に確認する候補です。",
     };
   }
   if (priority === "中") {
     return {
       id: "class_share",
-      label: "授業内共有",
-      detail: "個別添削ではなく、授業内で共有し、学生本人への問いにも返せる候補です。",
+      label: "授業共有",
+      detail: "個別添削ではなく、実習後の授業で共有し、学生本人への問いにも返せる候補です。",
     };
   }
   return {
@@ -283,28 +407,49 @@ function getReviewHandling(priority) {
   };
 }
 
-function formatLog(log) {
+function formatLog(log, className = "", schoolId = "") {
   const checks = Array.isArray(log.checks) ? log.checks : Array.isArray(log.output?.checks) ? log.output.checks : [];
   const headings = Array.isArray(log.output?.headings) ? log.output.headings : [];
   const reviewTags = getReviewTags(log);
+  const rawStudentId = log.user_id || log.session?.userId || "";
+  const studentId = buildStableStudentKey(schoolId, rawStudentId);
+  const generationId = buildOpaqueSummaryKey("generation", schoolId, log.id);
+  const sectionCount = Math.min(headings.length, 5);
   return {
-    id: log.id,
+    id: generationId,
+    generationId,
     kind: log.kind,
     status: log.status,
     createdAt: log.created_at,
-    studentName: safeStudentDisplayName(log.session?.userName || log.session?.name),
-    className: log.session?.className || "",
-    inputPreview: buildInputPreview(log.input),
-    outputPreview: checks[0] || headings.join(" / "),
-    sections: headings.map((heading, index) => ({
-      heading: heading || `項目${index + 1}`,
+    studentId,
+    studentName: "",
+    className: safeClassName(className),
+    inputPreview: buildSchoolSummaryInputPreview(log.input),
+    outputPreview: [sectionCount ? `整理項目 ${sectionCount}件` : "", checks.length ? `提出前確認 ${checks.length}件` : ""].filter(Boolean).join(" / "),
+    sections: Array.from({ length: sectionCount }, (_, index) => ({
+      heading: `整理項目 ${index + 1}`,
       body: "本文は個人情報保護と代筆防止のため保存・表示対象外です。提出前の自己確認とレビュー分類を確認してください。",
     })),
-    checks,
+    checks: reviewTags.map((tag) => `確認分類: ${tag}`),
     checkCount: checks.length,
     reviewTags,
     needsReview: reviewTags.length > 0,
+    hasNextObservation: hasNextObservationSignal(log),
   };
+}
+
+function buildOpaqueSummaryKey(prefix, scopeId, value) {
+  if (!scopeId || !value) return "";
+  const digest = createHash("sha256")
+    .update(`${prefix}\u0000${scopeId}\u0000${value}`)
+    .digest("hex")
+    .slice(0, 24);
+  return `${prefix}-${digest}`;
+}
+
+function hasNextObservationSignal(log = {}) {
+  const text = JSON.stringify({ input: log.input || {}, output: log.output || {}, checks: log.checks || [] });
+  return /明日|翌日|次/.test(text) && /観察|見る|見たい|見ます|見よう|見て/.test(text);
 }
 
 function isThinInput(input = {}) {
@@ -316,12 +461,13 @@ function getReviewTags(log) {
   const inputText = JSON.stringify(log.input || {});
   const outputText = JSON.stringify(log.output || {});
   const checks = Array.isArray(log.checks) ? log.checks : Array.isArray(log.output?.checks) ? log.output.checks : [];
+  const privacyFlags = log.input?.privacyFlags || {};
   const tags = [];
 
   if (isThinInput(log.input)) tags.push("追記促し");
   if (hasPossibleUnsupportedCompletion(inputText, outputText)) tags.push("補完疑い");
   if (RISK_TERMS.some((term) => inputText.includes(term))) tags.push("表現確認");
-  if (hasNameLikeText(inputText) || /匿名|置換|個人名|実名|愛称/.test(outputText)) tags.push("置換確認");
+  if (privacyFlags.hasSchoolNameLikeText || hasNameLikeText(inputText) || /匿名|置換|個人名|実名|愛称/.test(outputText)) tags.push("置換確認");
   if (checks.some((check) => GUIDELINE_TERMS.some((term) => String(check || "").includes(term)))) tags.push("指針確認");
   if (checks.length >= 4 || checks.some((check) => /未入力|追記|確認|相談/.test(check))) tags.push("確認多め");
   if (log.kind === "plan") tags.push("指導案");
@@ -345,66 +491,47 @@ function hasPossibleUnsupportedCompletion(inputText, outputText) {
   return POSSIBLE_COMPLETION_TERMS.some((term) => outputText.includes(term) && !inputText.includes(term));
 }
 
-function buildInputPreview(input = {}) {
-  const memoLength = String(input.memo || input.planMemo || "").trim().length;
-  const scene = input.scene ? `場面: ${redactPreviewText(input.scene).slice(0, 60)}` : "";
-  const age = input.age ? `年齢: ${redactPreviewText(input.age).slice(0, 30)}` : "";
-  const flags = input.privacyFlags && typeof input.privacyFlags === "object"
-    ? Object.entries(input.privacyFlags).filter(([, value]) => value).map(([key]) => key)
-    : [];
-  return [age, scene, `入力文字数: ${memoLength}`, flags.length ? `要確認: ${flags.length}件` : ""].filter(Boolean).join(" / ");
-}
-
-function redactPreviewText(value) {
-  return redactSensitiveTextForPreview(value);
-}
-
-function countActiveStudents(logs) {
-  return new Set(logs.map((log) => log.user_id).filter(Boolean)).size;
-}
-
 function buildCheckSummary(logs) {
   const counts = new Map();
   for (const log of logs) {
+    const studentId = log.user_id || log.session?.userId || "";
     for (const tag of getReviewTags(log)) {
-      counts.set(tag, (counts.get(tag) || 0) + 1);
+      if (!counts.has(tag)) counts.set(tag, { tag, count: 0, studentIds: new Set() });
+      const summary = counts.get(tag);
+      summary.count += 1;
+      if (studentId) summary.studentIds.add(studentId);
     }
   }
-  return [...counts.entries()]
-    .map(([tag, count]) => ({ tag, count }))
+  return [...counts.values()]
+    .map((item) => ({ tag: item.tag, count: item.count, studentCount: item.studentIds.size }))
     .sort((a, b) => b.count - a.count);
 }
 
-function buildStudentUsage(profiles, logs) {
+function buildStudentUsage(profiles, logs, schoolId = "", classNamesById = new Map()) {
   const studentProfiles = profiles.filter((profile) => profile.role === "student");
   const byUser = new Map(
-    studentProfiles.map((profile) => [
-      profile.id,
-      {
-        id: profile.id,
+    studentProfiles.map((profile, index) => {
+      const processStudentKey = buildStableStudentKey(schoolId, profile.id);
+      return [
+        profile.id,
+        {
+        id: processStudentKey || `student-${index + 1}`,
         name: safeStudentDisplayName(profile.display_name),
+        processStudentKey,
+        className: classNamesById.get(profile.class_id) || "",
         generations: 0,
         diary: 0,
         plan: 0,
         reviewCandidates: 0,
         latestAt: null,
-      },
-    ]),
+        },
+      ];
+    }),
   );
 
   for (const log of logs) {
     const id = log.user_id || log.session?.userId || log.id;
-    if (!byUser.has(id)) {
-      byUser.set(id, {
-        id,
-        name: safeStudentDisplayName(log.session?.userName || log.session?.name),
-        generations: 0,
-        diary: 0,
-        plan: 0,
-        reviewCandidates: 0,
-        latestAt: null,
-      });
-    }
+    if (!byUser.has(id)) continue;
     const item = byUser.get(id);
     item.generations += 1;
     if (log.kind === "diary") item.diary += 1;
