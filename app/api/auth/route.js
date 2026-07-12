@@ -1,6 +1,9 @@
 import { enforceRateLimit } from "../_rateLimit.js";
 import { enforceSameOriginRequest } from "../_requestSecurity.js";
 import { readLimitedJsonBody } from "../_jsonRequest.js";
+import { logSafeApiError, logSafeApiWarning } from "../_safeErrorLog.js";
+import { getPublicErrorDetails, registerPublicError } from "../_publicError.js";
+import { DEFAULT_SCHOOL_FORMAT, getSchoolFormatForSchool, summarizeStudentSchoolFormat } from "../_schoolFormat.js";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
@@ -10,7 +13,6 @@ const SUPABASE_DISABLED = process.env.MANABI_DISABLE_SUPABASE === "true";
 const ACCESS_COOKIE = "manabi_sb_access_token";
 const REFRESH_COOKIE = "manabi_sb_refresh_token";
 const DEFAULT_CLASS_NAME = "保育実習I / 2年A組";
-const ALLOW_PUBLIC_SIGNUP = process.env.MANABI_ALLOW_PUBLIC_SIGNUP === "true";
 const ROLE_LABELS = {
   admin: "管理者",
   teacher: "教員",
@@ -23,13 +25,25 @@ export async function GET(request) {
   if (isPublicDemoOnly()) return publicDemoApiDisabledResponse();
 
   if (!isAuthConfigured()) {
+    if (isProductionLikeRuntime()) {
+      return Response.json(
+        {
+          configured: false,
+          publicSignup: false,
+          session: null,
+          code: "auth_unavailable",
+          error: "学校アカウント認証を利用できません。管理者に連絡してください。",
+        },
+        { status: 503 },
+      );
+    }
     return Response.json({ configured: false, publicSignup: false, session: null });
   }
 
   const accessToken = getCookieValue(request, ACCESS_COOKIE);
   const refreshToken = getCookieValue(request, REFRESH_COOKIE);
   if (!accessToken && !refreshToken) {
-    return Response.json({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null });
+    return Response.json({ configured: true, publicSignup: isPublicSignupAllowed(), session: null });
   }
 
   const cookieUpdates = [];
@@ -38,25 +52,69 @@ export async function GET(request) {
     let currentAccessToken = accessToken;
     let user = null;
     if (currentAccessToken) {
-      user = await getAuthUser(currentAccessToken).catch(() => null);
+      try {
+        user = await getAuthUser(currentAccessToken);
+      } catch (error) {
+        if (getPublicErrorDetails(error)?.code !== "session_expired") throw error;
+      }
     }
 
     if (!user && refreshToken) {
       const refreshed = await refreshAuthSession(refreshToken);
       currentAccessToken = refreshed.access_token;
-      user = refreshed.user || (currentAccessToken ? await getAuthUser(currentAccessToken) : null);
+      user = await resolveAuthUser(refreshed);
       cookieUpdates.push(...buildAuthCookies(refreshed, request));
     }
 
     if (!user) {
-      return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies(request));
+      return jsonWithCookies({ configured: true, publicSignup: isPublicSignupAllowed(), session: null }, clearAuthCookies(request));
     }
 
     const session = await buildSessionFromUser(user, { accessToken: currentAccessToken });
-    return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session }, cookieUpdates);
+    return jsonWithCookies({ configured: true, publicSignup: isPublicSignupAllowed(), session }, cookieUpdates);
   } catch (error) {
-    console.warn("Supabase session restore failed:", error.message);
-    return jsonWithCookies({ configured: true, publicSignup: ALLOW_PUBLIC_SIGNUP, session: null }, clearAuthCookies(request));
+    const publicError = getPublicErrorDetails(error);
+    if (publicError?.code === "school_format_unavailable") {
+      return jsonWithCookies(
+        {
+          configured: true,
+          publicSignup: isPublicSignupAllowed(),
+          session: null,
+          code: publicError.code,
+          error: publicError.publicMessage,
+        },
+        cookieUpdates,
+        publicError.status,
+      );
+    }
+    if (publicError?.code === "session_expired" && publicError.status === 401) {
+      return jsonWithCookies({ configured: true, publicSignup: isPublicSignupAllowed(), session: null }, clearAuthCookies(request));
+    }
+    if (publicError && publicError.status < 500) {
+      return jsonWithCookies(
+        {
+          configured: true,
+          publicSignup: isPublicSignupAllowed(),
+          session: null,
+          code: publicError.code,
+          error: publicError.publicMessage,
+        },
+        cookieUpdates,
+        publicError.status,
+      );
+    }
+    logSafeApiWarning(error, "auth_session_restore_failed");
+    return jsonWithCookies(
+      {
+        configured: true,
+        publicSignup: isPublicSignupAllowed(),
+        session: null,
+        code: "auth_temporarily_unavailable",
+        error: "ログイン状態を確認できませんでした。少し時間を置いて再試行してください。",
+      },
+      cookieUpdates,
+      503,
+    );
   }
 }
 
@@ -70,14 +128,18 @@ export async function POST(request) {
   try {
     body = await readLimitedJson(request, 20000);
   } catch (error) {
+    const publicError = getPublicErrorDetails(error);
+    if (!publicError) {
+      logSafeApiError(error, "auth_operation_failed");
+    }
     return Response.json(
       {
         ok: false,
         configured: isAuthConfigured(),
-        code: error.code || "invalid_request",
-        error: error.publicMessage || "認証リクエストの形式が不正です。",
+        code: publicError?.code || "auth_failed",
+        error: publicError?.publicMessage || "認証リクエストを処理できませんでした。少し時間を置いて再試行してください。",
       },
-      { status: error.status || 400 },
+      { status: publicError?.status || 500 },
     );
   }
   const action = body.action;
@@ -94,34 +156,41 @@ export async function POST(request) {
   if (rateLimitResponse) return rateLimitResponse;
 
   if (!isAuthConfigured()) {
+    const unavailable = isProductionLikeRuntime();
     return Response.json(
       {
         ok: false,
         configured: false,
-        error: "学校アカウント認証が未設定です。確認用ログインを使用してください。",
+        ...(unavailable ? { code: "auth_unavailable" } : {}),
+        error: unavailable
+          ? "学校アカウント認証を利用できません。管理者に連絡してください。"
+          : "学校アカウント認証が未設定です。確認用ログインを使用してください。",
       },
-      { status: 400 },
+      { status: unavailable ? 503 : 400 },
     );
   }
 
   try {
     if (action === "signUp") {
-      return handleSignUp(body, request);
+      return await handleSignUp(body, request);
     }
     if (action === "signIn") {
-      return handleSignIn(body, request);
+      return await handleSignIn(body, request);
     }
     return Response.json({ ok: false, error: "auth action is invalid" }, { status: 400 });
   } catch (error) {
-    console.error("Supabase auth failed:", error.details || error.message);
+    const publicError = getPublicErrorDetails(error);
+    if (!isExpectedClientAuthError(error)) {
+      logSafeApiError(error, "auth_operation_failed");
+    }
     return Response.json(
       {
         ok: false,
         configured: true,
-        code: error.code || "auth_failed",
-        error: error.publicMessage || "ログインに失敗しました。メールアドレスとパスワードを確認してください。",
+        code: publicError?.code || "auth_failed",
+        error: publicError?.publicMessage || "ログインに失敗しました。メールアドレスとパスワードを確認してください。",
       },
-      { status: error.status || 500 },
+      { status: publicError?.status || 500 },
     );
   }
 }
@@ -154,7 +223,8 @@ async function handleSignIn(body, request) {
       password: credentials.password,
     },
   });
-  const user = auth.user || (auth.access_token ? await getAuthUser(auth.access_token) : null);
+  assertAuthTokenResponse(auth);
+  const user = await resolveAuthUser(auth);
   const session = await buildSessionFromUser(user, { ...body, accessToken: auth.access_token });
 
   return jsonWithCookies(
@@ -168,7 +238,7 @@ async function handleSignIn(body, request) {
 }
 
 async function handleSignUp(body, request) {
-  if (!ALLOW_PUBLIC_SIGNUP) {
+  if (!isPublicSignupAllowed()) {
     throw new AuthError(
       "signup_disabled",
       "新規登録は学校管理者の招待が必要です。先にユーザーとプロフィールを作成してください。",
@@ -193,10 +263,10 @@ async function handleSignUp(body, request) {
     },
   });
 
+  const sessionAuth = auth.session || auth;
   const user = auth.user || auth.session?.user;
-  if (user) {
-    await ensureProfile(user, userMetadata);
-  }
+  if (!isValidAuthUser(user)) throw createAuthTemporarilyUnavailableError();
+  await ensureProfile(user, userMetadata);
 
   if (!auth.session && !auth.access_token) {
     return Response.json({
@@ -207,6 +277,7 @@ async function handleSignUp(body, request) {
     });
   }
 
+  assertAuthTokenResponse(sessionAuth);
   const session = await buildSessionFromUser(user, userMetadata);
   return jsonWithCookies(
     {
@@ -214,7 +285,7 @@ async function handleSignUp(body, request) {
       configured: true,
       session,
     },
-    buildAuthCookies(auth.session || auth, request),
+    buildAuthCookies(sessionAuth, request),
   );
 }
 
@@ -233,9 +304,7 @@ function normalizeCredentials(body) {
 }
 
 async function buildSessionFromUser(user, fallback = {}) {
-  if (!user?.id) {
-    throw new AuthError("missing_user", "ユーザー情報を取得できませんでした。", 502);
-  }
+  if (!isValidAuthUser(user)) throw createAuthTemporarilyUnavailableError();
 
   let profile = await getProfile(user.id, fallback.accessToken);
   if (!profile) {
@@ -245,14 +314,29 @@ async function buildSessionFromUser(user, fallback = {}) {
       403,
     );
   }
+  if (!profile.school_id) {
+    throw new AuthError(
+      "school_profile_required",
+      "学校プロフィールに学校情報が未設定です。管理者に学校への紐づけを依頼してください。",
+      403,
+    );
+  }
 
   const metadata = user.user_metadata || {};
   const role = normalizeRole(profile.role);
   const school = profile?.school_id ? await getRowById("schools", profile.school_id, fallback.accessToken) : null;
   const classRecord = profile?.class_id ? await getRowById("classes", profile.class_id, fallback.accessToken) : null;
+  if (profile.class_id && (!classRecord || classRecord.school_id !== profile.school_id)) {
+    throw new AuthError(
+      "class_profile_mismatch",
+      "学校プロフィールのクラス情報が学校情報と一致しません。管理者にクラスへの紐づけを確認してください。",
+      403,
+    );
+  }
   const schoolName = school?.name || profile?.school_name || metadata.school_name || fallback.schoolName || "未設定の学校";
   const className = classRecord?.name || profile?.class_name || metadata.class_name || fallback.className || DEFAULT_CLASS_NAME;
   const name = profile?.display_name || metadata.display_name || fallback.name || user.email?.split("@")[0] || "利用者";
+  const schoolFormat = await getSessionSchoolFormat(profile.school_id);
 
   return {
     source: "supabase",
@@ -262,13 +346,38 @@ async function buildSessionFromUser(user, fallback = {}) {
     role,
     roleLabel: ROLE_LABELS[role],
     schoolId: profile?.school_id || school?.id || "",
-    classId: profile?.class_id || classRecord?.id || "",
+    classId: classRecord?.id || "",
     schoolName,
     schoolPlan: school?.plan || "",
     contractStatus: school?.contract_status || "",
     className,
+    schoolFormat,
     signedInAt: new Date().toISOString(),
   };
+}
+
+async function getSessionSchoolFormat(schoolId) {
+  if (!schoolId) return summarizeStudentSchoolFormat(DEFAULT_SCHOOL_FORMAT);
+  if (isProductionLikeRuntime() && !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new AuthError(
+      "school_format_unavailable",
+      "学校フォーマットを取得できませんでした。少し時間を置いて再試行してください。",
+      503,
+    );
+  }
+  try {
+    return summarizeStudentSchoolFormat(await getSchoolFormatForSchool(schoolId));
+  } catch (error) {
+    logSafeApiWarning(error, "school_format_session_load_failed");
+    if (isProductionLikeRuntime()) {
+      throw new AuthError(
+        "school_format_unavailable",
+        "学校フォーマットを取得できませんでした。少し時間を置いて再試行してください。",
+        503,
+      );
+    }
+    return summarizeStudentSchoolFormat(DEFAULT_SCHOOL_FORMAT);
+  }
 }
 
 async function ensureProfile(user, metadata = {}) {
@@ -299,14 +408,37 @@ async function ensureProfile(user, metadata = {}) {
 
 async function getProfile(userId, accessToken) {
   if (!isRestConfigured()) return null;
-  const rows = await supabaseRestFetch(`/profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`, { accessToken });
-  return rows?.[0] || null;
+  const rows = await supabaseRestFetch(`/profiles?select=id,school_id,class_id,role,display_name&id=eq.${encodeURIComponent(userId)}&limit=1`, { accessToken });
+  if (!Array.isArray(rows) || rows.length > 1) throw createAuthTemporarilyUnavailableError();
+  const profile = rows[0] || null;
+  if (!profile) return null;
+  if (
+    profile.id !== userId
+    || !Object.hasOwn(ROLE_LABELS, profile.role)
+    || (profile.school_id !== null && typeof profile.school_id !== "string")
+    || (profile.class_id !== null && typeof profile.class_id !== "string")
+  ) {
+    throw createAuthTemporarilyUnavailableError();
+  }
+  return profile;
 }
 
 async function getRowById(table, id, accessToken) {
   if (!isRestConfigured() || !id) return null;
-  const rows = await supabaseRestFetch(`/${table}?select=*&id=eq.${encodeURIComponent(id)}&limit=1`, { accessToken });
-  return rows?.[0] || null;
+  const selectByTable = {
+    schools: "id,name,plan,contract_status",
+    classes: "id,school_id,name,practicum_label,starts_on,ends_on",
+  };
+  const select = selectByTable[table];
+  if (!select) return null;
+  const rows = await supabaseRestFetch(`/${table}?select=${select}&id=eq.${encodeURIComponent(id)}&limit=1`, { accessToken });
+  if (!Array.isArray(rows) || rows.length > 1) throw createAuthTemporarilyUnavailableError();
+  const row = rows[0] || null;
+  if (!row) return null;
+  if (row.id !== id || (table === "classes" && typeof row.school_id !== "string")) {
+    throw createAuthTemporarilyUnavailableError();
+  }
+  return row;
 }
 
 async function findOrCreateSchool(name) {
@@ -330,34 +462,54 @@ async function findOrCreateClass(schoolId, name) {
 }
 
 async function getAuthUser(accessToken) {
-  return supabaseAuthFetch("/user", {
+  const user = await supabaseAuthFetch("/user", {
     headers: {
       authorization: `Bearer ${accessToken}`,
     },
   });
+  if (!isValidAuthUser(user)) throw createAuthTemporarilyUnavailableError();
+  return user;
+}
+
+async function resolveAuthUser(auth) {
+  if (auth.user !== undefined && auth.user !== null) {
+    if (!isValidAuthUser(auth.user)) throw createAuthTemporarilyUnavailableError();
+    return auth.user;
+  }
+  return getAuthUser(auth.access_token);
 }
 
 async function refreshAuthSession(refreshToken) {
-  return supabaseAuthFetch("/token?grant_type=refresh_token", {
+  const auth = await supabaseAuthFetch("/token?grant_type=refresh_token", {
     method: "POST",
     body: { refresh_token: refreshToken },
   });
+  assertAuthTokenResponse(auth);
+  return auth;
 }
 
 async function supabaseAuthFetch(path, options = {}) {
-  const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/auth/v1${path}`, {
-    method: options.method || "GET",
-    headers: {
-      apikey: SUPABASE_ANON_KEY,
-      "content-type": "application/json",
-      ...options.headers,
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/auth/v1${path}`, {
+      method: options.method || "GET",
+      headers: {
+        apikey: SUPABASE_ANON_KEY,
+        "content-type": "application/json",
+        ...options.headers,
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw createAuthTemporarilyUnavailableError();
+  }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw mapSupabaseError(data, response.status);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw createAuthTemporarilyUnavailableError();
   }
 
   return data;
@@ -367,41 +519,76 @@ async function supabaseRestFetch(path, options = {}) {
   const useUserToken = Boolean(options.accessToken);
   const apiKey = useUserToken ? SUPABASE_ANON_KEY : SUPABASE_SERVICE_ROLE_KEY;
   const authorization = useUserToken ? `Bearer ${options.accessToken}` : `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`;
-  const response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1${path}`, {
-    method: options.method || "GET",
-    headers: {
-      apikey: apiKey,
-      authorization,
-      "content-type": "application/json",
-      prefer: options.prefer || "return=representation",
-    },
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  let response;
+  try {
+    response = await fetch(`${SUPABASE_URL.replace(/\/$/, "")}/rest/v1${path}`, {
+      method: options.method || "GET",
+      headers: {
+        apikey: apiKey,
+        authorization,
+        "content-type": "application/json",
+        prefer: options.prefer || "return=representation",
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    throw createAuthTemporarilyUnavailableError();
+  }
 
   const text = await response.text();
   const data = text ? safeJsonParse(text) : null;
   if (!response.ok) {
-    throw new AuthError("supabase_rest_failed", "学校・クラス情報の保存に失敗しました。", 502, text);
+    throw createAuthTemporarilyUnavailableError();
   }
+  if (!Array.isArray(data)) throw createAuthTemporarilyUnavailableError();
 
   return data;
 }
 
 function mapSupabaseError(data, status) {
-  const message = String(data.msg || data.message || data.error_description || data.error || "");
+  if (status >= 500) return createAuthTemporarilyUnavailableError();
+  const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const message = String(source.msg || source.message || source.error_description || source.error || "");
   const lowered = message.toLowerCase();
 
   if (status === 400 && lowered.includes("invalid login")) {
-    return new AuthError("invalid_login", "メールアドレスまたはパスワードが違います。", 401, message);
+    return new AuthError("invalid_login", "メールアドレスまたはパスワードが違います。", 401);
   }
   if (status === 422 && lowered.includes("already")) {
-    return new AuthError("already_registered", "このメールアドレスはすでに登録されています。ログインしてください。", 409, message);
+    return new AuthError("already_registered", "このメールアドレスはすでに登録されています。ログインしてください。", 409);
   }
   if (status === 429) {
-    return new AuthError("auth_rate_limit", "ログイン試行が多すぎます。少し時間を置いてください。", 429, message);
+    return new AuthError("auth_rate_limit", "ログイン試行が多すぎます。少し時間を置いてください。", 429);
   }
+  if (status === 400 && lowered.includes("refresh token")) {
+    return new AuthError("session_expired", "ログインの有効期限が切れました。もう一度ログインしてください。", 401);
+  }
+  if (status === 401) {
+    return new AuthError("session_expired", "ログインの有効期限が切れました。もう一度ログインしてください。", 401);
+  }
+  return new AuthError("auth_failed", "学校アカウント認証でエラーが発生しました。", 500);
+}
 
-  return new AuthError("auth_failed", "学校アカウント認証でエラーが発生しました。", status || 500, message);
+function assertAuthTokenResponse(auth) {
+  if (!isNonEmptyString(auth?.access_token) || !isNonEmptyString(auth?.refresh_token)) {
+    throw createAuthTemporarilyUnavailableError();
+  }
+}
+
+function isValidAuthUser(user) {
+  return Boolean(user && typeof user === "object" && !Array.isArray(user) && isNonEmptyString(user.id));
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function createAuthTemporarilyUnavailableError() {
+  return new AuthError(
+    "auth_temporarily_unavailable",
+    "学校アカウント認証を一時的に利用できません。少し時間を置いて再試行してください。",
+    503,
+  );
 }
 
 function buildAuthCookies(auth, request) {
@@ -464,6 +651,21 @@ function isRestConfigured() {
   return Boolean(SUPABASE_URL && (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY));
 }
 
+function isPublicSignupAllowed() {
+  return process.env.MANABI_ALLOW_PUBLIC_SIGNUP === "true" && !isProductionLikeRuntime();
+}
+
+function isProductionLikeRuntime() {
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
+  if (["production", "preview"].includes(vercelEnv)) return true;
+
+  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
+  if (["production", "prod", "preview", "staging"].includes(explicitRuntime)) return true;
+  if (["development", "dev", "local", "test"].includes(explicitRuntime)) return false;
+
+  return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
+}
+
 function normalizeRole(role) {
   if (role === "admin" || role === "teacher" || role === "student") return role;
   return "student";
@@ -487,7 +689,13 @@ function getCookieValue(request, name) {
   const cookieHeader = request.headers.get("cookie") || "";
   for (const part of cookieHeader.split(";")) {
     const [rawKey, ...rawValue] = part.trim().split("=");
-    if (rawKey === name) return decodeURIComponent(rawValue.join("="));
+    if (rawKey === name) {
+      try {
+        return decodeURIComponent(rawValue.join("="));
+      } catch {
+        return "";
+      }
+    }
   }
   return "";
 }
@@ -505,12 +713,18 @@ function normalizeRuntimeEnv(value) {
 }
 
 class AuthError extends Error {
-  constructor(code, publicMessage, status = 500, details = "") {
+  constructor(code, publicMessage, status = 500) {
     super(publicMessage);
+    const safeStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
     this.name = "AuthError";
     this.code = code;
     this.publicMessage = publicMessage;
-    this.status = status;
-    this.details = details;
+    this.status = safeStatus;
+    registerPublicError(this, { code, publicMessage, status: safeStatus });
   }
+}
+
+function isExpectedClientAuthError(error) {
+  const details = getPublicErrorDetails(error);
+  return details !== null && details.status >= 400 && details.status < 500;
 }
