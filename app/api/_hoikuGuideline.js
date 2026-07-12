@@ -1,8 +1,52 @@
-export const HOIKU_GUIDELINE_REFERENCE = {
+const HOIKU_GUIDELINE_REFERENCE = {
   title: "保育所保育指針",
   agency: "こども家庭庁",
   sourceUrl: "https://www.cfa.go.jp/policies/hoiku",
+  scope: "保育所",
+  checkedAt: "2026-07-10",
 };
+
+export const HOIKU_PRACTICUM_REVIEW_REFERENCES = Object.freeze([
+  HOIKU_GUIDELINE_REFERENCE,
+  {
+    title: "幼稚園教育要領",
+    agency: "文部科学省",
+    sourceUrl: "https://www.mext.go.jp/a_menu/shotou/new-cs/youryou/you/index.htm",
+    scope: "幼稚園",
+    checkedAt: "2026-07-10",
+  },
+  {
+    title: "幼保連携型認定こども園教育・保育要領",
+    agency: "こども家庭庁",
+    sourceUrl: "https://www.cfa.go.jp/policies/kokoseido/kodomoen/kokuji/",
+    scope: "幼保連携型認定こども園",
+    checkedAt: "2026-07-10",
+  },
+]);
+
+const HOIKU_PRACTICUM_REVIEW_LENSES = Object.freeze([
+  "観察できた事実と、学生自身の解釈・推測が分かれているか",
+  "その日の実習目標と、記録した場面のつながりが事実から説明できるか",
+  "子どもの最善の利益、主体性、権利への配慮があるか",
+  "物・空間・時間などの環境と、保育者・実習生の援助を分けて振り返れているか",
+  "発達の過程や個人差を、決めつけや序列化なしに捉えているか",
+  "養護と教育を切り離さず、生活と遊びの中の子どもの姿を捉えているか",
+  "健康・人間関係・環境・言葉・表現の5領域が、実際の姿と結びつく場合だけ参照されているか",
+  "安全、個人情報、家庭事情、診断名などの扱いに問題がないか",
+  "翌日に確かめる観察点や、自分の関わりを見直す問いへつながっているか",
+]);
+
+export function buildHoikuPracticumReviewPromptBlock() {
+  return [
+    "【提出前の専門的な見直し】",
+    "保育所保育指針、幼稚園教育要領、幼保連携型認定こども園教育・保育要領に共通する考え方を、実習記録の見直し観点として使います。制度の解説や条文の引用ではなく、学生が記録を直すための短い専門コメントに変換してください。",
+    `見直し観点: ${HOIKU_PRACTICUM_REVIEW_LENSES.join("、")}。`,
+    "professionalReviewでは、focusTextに入力から見直す短い箇所をそのまま抜き出し、reasonに保育の専門性として重要な理由、revisionPromptに次に何を確認・追記するかを一問で示してください。点数、合否、優劣、子ども・学生・実習先の評価はしません。",
+    "5領域は複数ある見直し観点の一つです。単語の一致だけで領域へ分類せず、入力された子どもの姿と結びつく時だけ、理由を添えて参照してください。領域名を出さない専門コメントも適切です。",
+    "子どもの内面、保育者の意図、発達上の効果、場面の結果を推測で補いません。根拠が足りない時は、不足する観察事実をmissingInformationの一問へ戻してください。",
+    "学生が自分で書き直せるよう、完成文を作らず、指摘だけで終わらず、直す方向を具体的に示してください。",
+  ].join("\n");
+}
 
 export function buildHoikuGuidelinePromptBlock(kind = "common") {
   const base = [

@@ -1,3 +1,5 @@
+import { registerPublicError } from "./_publicError.js";
+
 export async function readLimitedJsonBody(request, maxBytes, options = {}) {
   if (options.requireJsonContentType) {
     enforceJsonContentType(request, options);
@@ -13,10 +15,27 @@ export async function readLimitedJsonBody(request, maxBytes, options = {}) {
     throw buildError(options, "request_too_large", options.tooLargeMessage || "リクエストが大きすぎます。", 413);
   }
 
+  let body;
   try {
-    return JSON.parse(text || "{}");
+    body = JSON.parse(text || "{}");
   } catch {
     throw buildError(options, "invalid_json", options.invalidJsonMessage || "リクエスト形式が不正です。", 400);
+  }
+
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw buildError(options, "invalid_request", options.invalidRequestMessage || "リクエスト形式が不正です。", 400);
+  }
+  return body;
+}
+
+export class JsonRequestError extends Error {
+  constructor(code, publicMessage, status) {
+    super(publicMessage);
+    this.name = "JsonRequestError";
+    this.code = code;
+    this.publicMessage = publicMessage;
+    this.status = status;
+    registerPublicError(this, { code, publicMessage, status });
   }
 }
 
@@ -38,10 +57,5 @@ function buildError(options, code, message, status) {
     return options.errorFactory(code, message, status);
   }
 
-  const error = new Error(message);
-  error.name = "JsonRequestError";
-  error.code = code;
-  error.publicMessage = message;
-  error.status = status;
-  return error;
+  return new JsonRequestError(code, message, status);
 }

@@ -24,21 +24,21 @@ export function isRestConfigured() {
 }
 
 export function isProductionLikeRuntime() {
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
+  if (["production", "preview"].includes(vercelEnv)) return true;
+
   const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
   if (["production", "prod", "preview", "staging"].includes(explicitRuntime)) return true;
   if (["development", "dev", "local", "test"].includes(explicitRuntime)) return false;
-
-  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
-  if (["production", "preview"].includes(vercelEnv)) return true;
 
   return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
 }
 
 export function shouldFailClosedWhenRestMissing() {
-  return !SUPABASE_DISABLED && isProductionLikeRuntime() && !isRestConfigured();
+  return isProductionLikeRuntime() && !isRestConfigured();
 }
 
-export async function getAuthenticatedUser(request) {
+async function getAuthenticatedUser(request) {
   if (!isAuthConfigured()) return null;
   const accessToken = getCookieValue(request, ACCESS_COOKIE);
   if (!accessToken) return null;
@@ -51,8 +51,11 @@ export async function getAuthenticatedUser(request) {
     },
   });
 
-  if (!response.ok) return null;
-  return response.json();
+  if (response.status === 401) return null;
+  if (!response.ok) throw new Error("supabase_auth_unavailable");
+  const user = await response.json().catch(() => null);
+  if (!user?.id) throw new Error("supabase_auth_response_invalid");
+  return user;
 }
 
 export async function getServerSessionContext(request) {
@@ -60,9 +63,13 @@ export async function getServerSessionContext(request) {
   if (!user?.id) return { user: null, profile: null, session: null };
 
   const profile = await getProfile(user.id);
+  if (!profile?.school_id) return { user, profile: null, session: null };
   const role = normalizeRole(profile?.role);
   const school = profile?.school_id ? await getRowById("schools", profile.school_id) : null;
   const classRecord = profile?.class_id ? await getRowById("classes", profile.class_id) : null;
+  if (profile.class_id && (!classRecord || classRecord.school_id !== profile.school_id)) {
+    return { user, profile: null, session: null };
+  }
 
   return {
     user,
@@ -75,7 +82,7 @@ export async function getServerSessionContext(request) {
       role,
       roleLabel: ROLE_LABELS[role],
       schoolId: profile?.school_id || "",
-      classId: profile?.class_id || "",
+      classId: classRecord?.id || "",
       schoolName: school?.name || "未設定の学校",
       schoolPlan: school?.plan || "",
       contractStatus: school?.contract_status || "",
@@ -86,13 +93,21 @@ export async function getServerSessionContext(request) {
 
 export async function getProfile(userId) {
   if (!isRestConfigured() || !userId) return null;
-  const rows = await supabaseRestFetch(`/profiles?select=*&id=eq.${encodeURIComponent(userId)}&limit=1`);
+  const rows = await supabaseRestFetch(`/profiles?select=id,school_id,class_id,role,display_name&id=eq.${encodeURIComponent(userId)}&limit=1`);
+  if (!Array.isArray(rows)) throw new Error("supabase_profile_response_invalid");
   return rows?.[0] || null;
 }
 
 export async function getRowById(table, id) {
   if (!isRestConfigured() || !id) return null;
-  const rows = await supabaseRestFetch(`/${table}?select=*&id=eq.${encodeURIComponent(id)}&limit=1`);
+  const selectByTable = {
+    schools: "id,name,plan,contract_status",
+    classes: "id,school_id,name,practicum_label,starts_on,ends_on",
+  };
+  const select = selectByTable[table];
+  if (!select) return null;
+  const rows = await supabaseRestFetch(`/${table}?select=${select}&id=eq.${encodeURIComponent(id)}&limit=1`);
+  if (!Array.isArray(rows)) throw new Error("supabase_row_response_invalid");
   return rows?.[0] || null;
 }
 
@@ -117,8 +132,8 @@ export async function supabaseRestFetch(path, options = {}) {
   const data = text ? safeJsonParse(text) : null;
   if (!response.ok) {
     const error = new Error("Supabase REST request failed");
+    error.code = "supabase_rest_failed";
     error.status = response.status;
-    error.details = text;
     throw error;
   }
 
@@ -129,7 +144,13 @@ export function getCookieValue(request, name) {
   const cookieHeader = request.headers.get("cookie") || "";
   for (const part of cookieHeader.split(";")) {
     const [rawKey, ...rawValue] = part.trim().split("=");
-    if (rawKey === name) return decodeURIComponent(rawValue.join("="));
+    if (rawKey === name) {
+      try {
+        return decodeURIComponent(rawValue.join("="));
+      } catch {
+        return "";
+      }
+    }
   }
   return "";
 }

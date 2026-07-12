@@ -18,16 +18,6 @@ const publicDemoRedirectPagePrefixes = [
   "/commercial-transactions",
 ];
 const publicDemoRedirectStaticPaths = ["/offline.html", "/sw.js"];
-const publicDemoBlockedApiPrefixes = [
-  "/api/health",
-  "/api/workspace",
-  "/api/auth",
-  "/api/generate",
-  "/api/privacy-check",
-  "/api/school",
-  "/api/logs",
-  "/api/demo/access",
-];
 const publicDemoAllowedPaths = ["/demo", "/demo/student", "/demo/teacher"];
 
 export function proxy(request) {
@@ -43,9 +33,7 @@ export function proxy(request) {
     return request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(`${prefix}/`);
   });
   const isPublicDemoRedirectStaticPath = publicDemoRedirectStaticPaths.includes(request.nextUrl.pathname);
-  const isPublicDemoBlockedApiPath = publicDemoBlockedApiPrefixes.some(
-    (prefix) => request.nextUrl.pathname === prefix || request.nextUrl.pathname.startsWith(`${prefix}/`),
-  );
+  const isPublicDemoBlockedApiPath = request.nextUrl.pathname === "/api" || request.nextUrl.pathname.startsWith("/api/");
   const isPublicDemoAllowedPath = publicDemoAllowedPaths.includes(request.nextUrl.pathname);
   if (isPrivatePage) {
     Object.assign(headers, NO_STORE_HEADERS);
@@ -114,21 +102,6 @@ export const config = {
     "/sw.js",
     "/workspace",
     "/workspace/:path*",
-    "/api/health",
-    "/api/health/:path*",
-    "/api/workspace",
-    "/api/workspace/:path*",
-    "/api/auth",
-    "/api/auth/:path*",
-    "/api/generate",
-    "/api/generate/:path*",
-    "/api/privacy-check",
-    "/api/privacy-check/:path*",
-    "/api/school",
-    "/api/school/:path*",
-    "/api/logs",
-    "/api/logs/:path*",
-    "/api/demo/access",
-    "/api/demo/access/:path*",
+    "/api/:path*",
   ],
 };

@@ -43,3 +43,15 @@ export function normalizePrivacyScanText(value) {
     .replace(/[\u200B-\u200D\uFEFF\u202A-\u202E\u2066-\u2069]/g, "")
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
 }
+
+export function collectPrivacyScanTextValues(value, depth = 0) {
+  if (depth > 5 || value === undefined || value === null) return "";
+  if (typeof value === "string") return normalizePrivacyScanText(value);
+  if (Array.isArray(value)) {
+    return value.slice(0, 100).map((item) => collectPrivacyScanTextValues(item, depth + 1)).filter(Boolean).join(" ");
+  }
+  if (typeof value === "object") {
+    return Object.values(value).slice(0, 100).map((item) => collectPrivacyScanTextValues(item, depth + 1)).filter(Boolean).join(" ");
+  }
+  return "";
+}

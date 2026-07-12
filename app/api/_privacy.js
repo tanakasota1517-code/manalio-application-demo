@@ -25,6 +25,37 @@ const FAMILY_INFO_PATTERN = createFamilyInfoPattern("i");
 const FAMILY_INFO_REDACTION_PATTERN = createFamilyInfoPattern("gi");
 const GUARDIAN_NAME_PATTERN = createGuardianNamePattern();
 const GUARDIAN_NAME_REDACTION_PATTERN = createGuardianNamePattern("g");
+const ABSTRACT_FACILITY_LABEL_SOURCE =
+  "認定こども園名|こども園名|保育園名|保育所名|幼稚園名|ナーサリー名|キッズ園名|園名|実習先名|施設名";
+const ABSTRACT_FACILITY_LABEL_PREFIX_SOURCE =
+  "(?:実習先の|施設の|学校の|学校が指定する|学校指定の|指定する|各|該当の|対象の|日誌の|様式の|記入欄の|入力欄の|この|その|当該)?";
+const ABSTRACT_FACILITY_LABEL_TOKEN_SOURCE = `${ABSTRACT_FACILITY_LABEL_PREFIX_SOURCE}(?:${ABSTRACT_FACILITY_LABEL_SOURCE})`;
+const ABSTRACT_FACILITY_LABEL_QUALIFIER_SOURCE = "(?:(?:の)?(?:欄|項目)|の場合|場合)?";
+const FACILITY_LABEL_PARTICLE_SOURCE = "(?:には|では|として|は|へ|に|を)";
+const FACILITY_LABEL_SEPARATOR_SOURCE = "[:：=＝>＞→⇒\\-ー−–—・/／、,，;；|｜（(【「『\\[［《〈〔<＜{｛]";
+const FACILITY_LABEL_BRACKET_OPEN_SOURCE = "[（(【「『\\[［《〈〔<＜{｛]";
+const FACILITY_LABEL_BRACKET_CLOSE_SOURCE = "[）)】」』\\]］》〉〕>＞}｝]";
+const ABSTRACT_FACILITY_LABELS = new Set(ABSTRACT_FACILITY_LABEL_SOURCE.split("|"));
+const ABSTRACT_FACILITY_LABEL_PATTERN = new RegExp(`(?:${ABSTRACT_FACILITY_LABEL_SOURCE})`, "g");
+const FACILITY_NAME_LIKE_PATTERN =
+  /([一-龯ぁ-んァ-ンA-Za-z0-9０-９〇○々ヶヵー・]{1,30})[\s　\-ー−–—・/／]*(認定こども園|こども園|保育園|保育所|幼稚園|ナーサリー|キッズ園)名?/;
+const FACILITY_NAME_REDACTION_PATTERN =
+  /([一-龯ぁ-んァ-ンA-Za-z0-9０-９〇○々ヶヵー・]{1,30})[\s　\-ー−–—・/／]*(認定こども園|こども園|保育園|保育所|幼稚園|ナーサリー|キッズ園)名?/g;
+const FACILITY_LABEL_VALUE_REDACTION_PATTERN = new RegExp(
+  `(^|[\\s　、。,.：:【（(「『])(${ABSTRACT_FACILITY_LABEL_TOKEN_SOURCE})(?:${ABSTRACT_FACILITY_LABEL_QUALIFIER_SOURCE})(?:\\s*${FACILITY_LABEL_SEPARATOR_SOURCE}\\s*|\\s+)(?!(?:${ABSTRACT_FACILITY_LABEL_TOKEN_SOURCE})|(?:には|では|として|は|へ|を|に|と|や|及び|並びに|または|又は))([^、。\\n\\r】）)」』]{1,80})`,
+  "g",
+);
+const FACILITY_LABEL_BRACKET_VALUE_REDACTION_PATTERN = new RegExp(
+  `(^|[\\s　、。,.：:【（(「『])(${ABSTRACT_FACILITY_LABEL_TOKEN_SOURCE})(?:${ABSTRACT_FACILITY_LABEL_QUALIFIER_SOURCE})\\s*${FACILITY_LABEL_BRACKET_OPEN_SOURCE}\\s*([^）)】」』\\]］》〉〕>＞}｝\\n\\r]{1,40})\\s*${FACILITY_LABEL_BRACKET_CLOSE_SOURCE}[^。\\n\\r]{0,40}`,
+  "g",
+);
+const FACILITY_LABEL_HA_VALUE_REDACTION_PATTERN = new RegExp(
+  `(^|[\\s　、。,.：:【（(「『・/／\\-ー−–—])(${ABSTRACT_FACILITY_LABEL_TOKEN_SOURCE})(?:${ABSTRACT_FACILITY_LABEL_QUALIFIER_SOURCE})\\s*${FACILITY_LABEL_PARTICLE_SOURCE}\\s*([^。\\n\\r】）)」』]{1,80})`,
+  "g",
+);
+const SAFE_FACILITY_LABEL_TAIL_PATTERN =
+  /^(?:(?:入力しない|記入しない|記入不要|書かない|記載しない|載せない)(?:こと|でください|ようにする|してください|ようにしてください|ようお願いします|ようお願いいたします)?|避け(?:る|てください|ること|るようにする|るようにしてください|るようお願いします|るようお願いいたします)?|(?:確認|削除|省略|マスキング|匿名化)(?:する|してください|できている|できています|するようにしてください|するようお願いします|するようお願いいたします)?|(?:置き換え|置換)(?:る|する|てください)?|伏せ字(?:にする|で扱う|で残す)?|(?:安全な表現|安全な形|別の表現|匿名表現|置換済み表現|実習先園|担任職員|主任職員|学校の教員|A児|B児|C児|D児|E児)(?:(?:に|へ)(?:置き換え(?:る)?|置換する?|する|してください)|として(?:扱う|使う|残す)|で(?:扱う|使う|残す))?)(?:[、,]\s*(?:学生本人の言葉を残す|入力にない事実を補わない|記録にない事実を補わない|安全な表現に整える))*$/;
+const SCHOOL_NAME_FLAG_PATTERN = /(保育園|保育所|幼稚園|認定こども園|こども園|ナーサリー|キッズ園|園名|実習先名|施設名)/;
 
 const AI_BLOCKING_PATTERNS = [
   {
@@ -73,8 +104,10 @@ const SENSITIVE_REPLACEMENTS = [
   [/(氏名|名前|実名|本名|園児名|児童名|保護者名)[:：]\s*[^\s、。]{1,30}/g, "〈氏名〉"],
   [GUARDIAN_NAME_REDACTION_PATTERN, "〈保護者名〉"],
   [/(学籍番号|学生番号|出席番号)[:：]?\s*[A-Za-z0-9\-ー−]{2,40}/g, "〈識別番号〉"],
-  [/([一-龯ぁ-んァ-ンA-Za-z0-9０-９]{2,30})(保育園|幼稚園|こども園|認定こども園|ナーサリー|キッズ園)/g, "〈園名〉"],
-  [/(園名|実習先名|施設名)[:：]?\s*[^\s、。]{1,40}/g, "〈園名〉"],
+  [FACILITY_NAME_REDACTION_PATTERN, redactFacilityName],
+  [FACILITY_LABEL_BRACKET_VALUE_REDACTION_PATTERN, redactFacilityLabelValue],
+  [FACILITY_LABEL_VALUE_REDACTION_PATTERN, redactFacilityLabelValue],
+  [FACILITY_LABEL_HA_VALUE_REDACTION_PATTERN, redactFacilityLabelValue],
   [MEDICAL_INFO_REDACTION_PATTERN, "〈診断名等〉"],
   [FAMILY_INFO_REDACTION_PATTERN, "〈配慮情報〉"],
   [/(担任教員名|担任名|職員名|保育者名|先生名)[:：]?\s*[^\s、。]{0,30}/g, "担任職員"],
@@ -99,6 +132,7 @@ const AI_TEXT_FIELDS_BY_KIND = {
     "tone",
   ],
   plan: ["age", "time", "activity", "planMemo"],
+  student_chat: ["target", "formatLabel", "title", "currentQuestion", "practiceGoal", "episodeMemo", "answer"],
 };
 
 function removeAllowedAnonymizedTerms(text) {
@@ -181,7 +215,18 @@ function buildAiPrivacyBlockMessage(findings) {
 
 export function sanitizeGenerationInputForLog(kind, payload = {}, privacyGuard = null) {
   const source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
-  const base = kind === "plan"
+  const base = kind === "student_chat"
+    ? {
+        stage: cleanShortValue(source.stage, 30),
+        target: cleanShortValue(source.target, 80),
+        formatLabel: cleanShortValue(source.formatLabel, 120),
+        title: cleanShortValue(source.title, 120),
+        currentQuestionLength: textLength(source.currentQuestion),
+        practiceGoalLength: textLength(source.practiceGoal),
+        episodeMemoLength: textLength(source.episodeMemo),
+        answerLength: textLength(source.answer),
+      }
+    : kind === "plan"
     ? {
         age: cleanShortValue(source.age, 60),
         time: cleanShortValue(source.time, 60),
@@ -211,12 +256,58 @@ export function sanitizeGenerationInputForLog(kind, payload = {}, privacyGuard =
 }
 
 export function sanitizeGenerationOutputForLog(content = {}) {
+  if (content?.kind === "student_chat") {
+    return removeEmptyValues({
+      kind: "student_chat",
+      stage: cleanShortValue(content.stage, 30),
+      target: cleanShortValue(content.target, 80),
+      acknowledgementLength: textLength(content.acknowledgement),
+      nextQuestionLength: textLength(content.nextQuestion),
+      fieldHintLength: textLength(content.fieldHint),
+      safetyNoteLength: textLength(content.safetyNote),
+      organization: sanitizeStudentChatOrganizationForLog(content.organization),
+      sanitized: true,
+    });
+  }
+
   return removeEmptyValues({
     headings: normalizeTextList(content.headings, 5, 80),
     sectionCount: Array.isArray(content.sections) ? Math.min(content.sections.length, 5) : undefined,
-    checks: normalizeTextList(content.checks, 5, 220),
+    checks: sanitizeChecksForLog(content.checks),
+    checkCount: Array.isArray(content.checks) ? Math.min(content.checks.filter(Boolean).length, 5) : undefined,
     schoolFormat: sanitizeSchoolFormatSummary(content.schoolFormat),
     sanitized: true,
+  });
+}
+
+function sanitizeStudentChatOrganizationForLog(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return removeEmptyValues({
+    factSummaryLength: textLength(value.factSummary),
+    goalConnectionLength: textLength(value.goalConnection),
+    professionalReview: sanitizeStudentChatProfessionalReviewForLog(value.professionalReview),
+    reflectionStarterLength: textLength(value.reflectionStarter),
+    fieldStarterLengths: sanitizeStudentChatFieldStarterLengths(value.fieldStarters),
+    missingInformationLength: textLength(value.missingInformation),
+  });
+}
+
+function sanitizeStudentChatFieldStarterLengths(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return removeEmptyValues({
+    goalReflection: textLength(value.goalReflection),
+    episodeInsight: textLength(value.episodeInsight),
+    overallLearning: textLength(value.overallLearning),
+    nextAction: textLength(value.nextAction),
+  });
+}
+
+function sanitizeStudentChatProfessionalReviewForLog(value = {}) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  return removeEmptyValues({
+    focusTextLength: textLength(value.focusText),
+    reasonLength: textLength(value.reason),
+    revisionPromptLength: textLength(value.revisionPrompt),
   });
 }
 
@@ -224,19 +315,24 @@ export function sanitizeFeedbackForLog(feedback = {}) {
   if (!feedback || typeof feedback !== "object" || Array.isArray(feedback)) return {};
   return removeEmptyValues({
     guidanceCategory: cleanShortValue(feedback.guidanceCategory, 40),
-    received: cleanLongValue(feedback.received, 400),
-    interpretation: cleanLongValue(feedback.interpretation, 400),
-    unclear: cleanLongValue(feedback.unclear, 300),
-    tomorrowAction: cleanLongValue(feedback.tomorrowAction, 300),
-    teacherQuestion: cleanLongValue(feedback.teacherQuestion, 300),
+    receivedLength: nonZeroTextLength(feedback.received),
+    interpretationLength: nonZeroTextLength(feedback.interpretation),
+    unclearLength: nonZeroTextLength(feedback.unclear),
+    tomorrowActionLength: nonZeroTextLength(feedback.tomorrowAction),
+    teacherQuestionLength: nonZeroTextLength(feedback.teacherQuestion),
     nextObservationPlan: sanitizeFeedbackNextObservationPlan(feedback.nextObservationPlan),
     clarity: cleanShortValue(feedback.clarity, 40),
     usefulness: cleanShortValue(feedback.usefulness, 40),
-    concern: cleanLongValue(feedback.concern),
-    comment: cleanLongValue(feedback.comment),
-    checked: Array.isArray(feedback.checked) ? feedback.checked.map((item) => cleanShortValue(item, 80)).filter(Boolean).slice(0, 10) : undefined,
+    concernLength: nonZeroTextLength(feedback.concern),
+    commentLength: nonZeroTextLength(feedback.comment),
+    checkedCount: Array.isArray(feedback.checked) ? Math.min(feedback.checked.filter(Boolean).length, 10) : undefined,
+    privacyFlags: buildPrivacyFlags(feedback),
     sanitized: true,
   });
+}
+
+export function sanitizeVisibleAiText(value, maxLength = 1200) {
+  return redactSensitiveText(value).slice(0, maxLength);
 }
 
 export function redactSensitiveTextForPreview(value, maxLength = MAX_LOG_TEXT) {
@@ -246,10 +342,22 @@ export function redactSensitiveTextForPreview(value, maxLength = MAX_LOG_TEXT) {
 function sanitizeFeedbackNextObservationPlan(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return removeEmptyValues({
-    focus: cleanShortValue(value.focus, 80),
-    observationPoints: normalizeTextList(value.observationPoints, 5, 180),
-    diaryChecks: normalizeTextList(value.diaryChecks, 5, 180),
-    consultQuestions: normalizeTextList(value.consultQuestions, 3, 180),
+    focusLength: nonZeroTextLength(value.focus),
+    observationPointCount: countNonEmptyTextItems(value.observationPoints, 5),
+    diaryCheckCount: countNonEmptyTextItems(value.diaryChecks, 5),
+    consultQuestionCount: countNonEmptyTextItems(value.consultQuestions, 3),
+  });
+}
+
+export function sanitizeLogSessionForLog(session = {}) {
+  if (!session || typeof session !== "object" || Array.isArray(session)) return {};
+  return removeEmptyValues({
+    source: cleanShortValue(session.source || "supabase", 40),
+    userId: cleanShortValue(session.userId, 80),
+    role: cleanShortValue(session.role || "student", 30),
+    schoolId: cleanShortValue(session.schoolId, 80),
+    classId: cleanShortValue(session.classId, 80),
+    sanitized: true,
   });
 }
 
@@ -270,7 +378,7 @@ export function sanitizeResultMetaForLog(resultMeta = {}) {
 }
 
 export function buildClientGenerationResponse(content = {}) {
-  const { model, source, subscription, bedrockGuardrail, privacyGuard, ...clientContent } = content;
+  const { model, source, subscription, bedrockGuardrail, privacyGuard, schoolFormat, ...clientContent } = content;
   return clientContent;
 }
 
@@ -329,12 +437,32 @@ function normalizeTextList(value, maxItems, maxLength) {
   return value.map((item) => cleanLongValue(item, maxLength)).filter(Boolean).slice(0, maxItems);
 }
 
+function sanitizeChecksForLog(value) {
+  if (!Array.isArray(value)) return [];
+  const labels = value.map(classifyCheckForLog).filter(Boolean).slice(0, 5);
+  return [...new Set(labels)];
+}
+
+function classifyCheckForLog(value) {
+  const text = String(value || "");
+  if (!text.trim()) return "";
+  if (/個人|匿名|置換|実名|名前|園名|施設名|職員|先生/.test(text)) return "個人情報の確認";
+  if (/断定|評価|診断|決めつけ|発達|気持ち|判断/.test(text)) return "表現の確認";
+  if (/5領域|五領域|保育所保育指針|指針/.test(text)) return "指針とのつながり確認";
+  if (/未入力|追記|具体|場面|内容|声かけ|観察/.test(text)) return "入力不足の確認";
+  if (/教員|相談|確認/.test(text)) return "教員への相談整理";
+  return "提出前の自己確認";
+}
+
 function sanitizeSchoolFormatSummary(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   return removeEmptyValues({
-    diaryHeadings: normalizeTextList(value.diaryHeadings, 5, 80),
-    planHeadings: normalizeTextList(value.planHeadings, 5, 80),
-    checkRules: normalizeTextList(value.checkRules, 8, 120),
+    applied: true,
+    diaryHeadingCount: countNonEmptyTextItems(value.diaryHeadings, 20),
+    studentDiaryFieldLabelCount: countObjectTextValues(value.studentDiaryFieldLabels || value.diaryFieldLabels, 20),
+    planHeadingCount: countNonEmptyTextItems(value.planHeadings, 20),
+    checkRuleCount: countNonEmptyTextItems(value.checkRules, 30),
+    hasWritingStyle: textLength(value.writingStyle) > 0 ? true : undefined,
   });
 }
 
@@ -343,7 +471,7 @@ function buildPrivacyFlags(value) {
   const riskText = removeAllowedAnonymizedTerms(text);
   return removeEmptyValues({
     hasChildNameLikeText: /(くん|ちゃん|氏名|名前|愛称)/.test(riskText) || undefined,
-    hasSchoolNameLikeText: /(保育園|幼稚園|こども園|園名)/.test(riskText) || undefined,
+    hasSchoolNameLikeText: SCHOOL_NAME_FLAG_PATTERN.test(riskText) || undefined,
     hasMedicalOrFamilyInfo: (MEDICAL_INFO_PATTERN.test(riskText) || FAMILY_INFO_PATTERN.test(riskText)) || undefined,
     hasContactInfo: (/@|https?:\/\//i.test(riskText) || PHONE_PATTERN.test(riskText) || CONTACT_LABEL_PATTERN.test(riskText)) || undefined,
     hasIdentifierLikeText: (/(学籍番号|学生番号|出席番号|住所|所在地|保護者名)/.test(riskText) || JAPANESE_ADDRESS_PATTERN.test(riskText) || GUARDIAN_NAME_PATTERN.test(riskText)) || undefined,
@@ -415,8 +543,75 @@ function redactSensitiveText(text) {
   return next.replace(/\s{3,}/g, " ");
 }
 
+function redactFacilityName(raw, name, facility) {
+  const compact = `${name}${facility}${raw.endsWith("名") ? "名" : ""}`;
+  return ABSTRACT_FACILITY_LABELS.has(compact) || isAbstractFacilityReference(raw) ? raw : "〈園名〉";
+}
+
+function redactFacilityLabelValue(raw, prefix = "", _label = "", tail = "") {
+  return isSafeAbstractFacilityLabelRule(tail) ? raw : `${prefix}〈園名〉`;
+}
+
+function isAbstractFacilityReference(value) {
+  const remainder = String(value || "")
+    .replace(ABSTRACT_FACILITY_LABEL_PATTERN, "")
+    .replace(/実習先の|施設の|学校の|学校が指定する|学校指定の|指定する|各|該当の|対象の|日誌の|様式の|記入欄の|入力欄の|この|その|当該/g, "")
+    .replace(/と|や|及び|並びに|または|又は|[\s　\-ー−–—・/／、,]+/g, "")
+    .trim();
+  return remainder === "";
+}
+
+function isSafeAbstractFacilityLabelRule(value) {
+  const text = String(value || "").replace(/^\s*[:：]?\s*/, "").trim();
+  if (!text) return false;
+  if (isAbstractFacilityLabelList(text)) return true;
+  const abstractLabelRuleTail = text
+    .replace(ABSTRACT_FACILITY_LABEL_PATTERN, "")
+    .replace(/^[\s　\-ー−–—・/／、,とや及び並びにまたは又は]+/g, "")
+    .trim();
+  if (abstractLabelRuleTail.startsWith("は")) {
+    return isSafeFacilityLabelTail(abstractLabelRuleTail.replace(/^は\s*/, ""));
+  }
+  const withoutAbstractLabels = text.replace(ABSTRACT_FACILITY_LABEL_PATTERN, "");
+  if (FACILITY_NAME_LIKE_PATTERN.test(withoutAbstractLabels)) return false;
+  return isSafeFacilityLabelTail(text);
+}
+
+function isSafeFacilityLabelTail(value) {
+  const text = String(value || "")
+    .replace(/^\s*[:：=＝>＞→⇒\-ー−–—・/／、,，;；|｜（(【「『\[\［《〈〔<＜{｛]?\s*/, "")
+    .replace(/\s*[）)】」』\]\］》〉〕>＞}｝]\s*$/g, "")
+    .trim();
+  if (!text) return false;
+  return SAFE_FACILITY_LABEL_TAIL_PATTERN.test(text);
+}
+
+function isAbstractFacilityLabelList(value) {
+  const remainder = String(value || "")
+    .replace(ABSTRACT_FACILITY_LABEL_PATTERN, "")
+    .replace(/[\s　\-ー−–—・/／、,とや及び並びにまたは又は]+/g, "")
+    .trim();
+  return remainder === "";
+}
+
 function textLength(value) {
   return String(value || "").trim().length;
+}
+
+function nonZeroTextLength(value) {
+  return textLength(value) || undefined;
+}
+
+function countNonEmptyTextItems(value, maxItems) {
+  if (!Array.isArray(value)) return undefined;
+  const count = value.map((item) => String(item || "").trim()).filter(Boolean).slice(0, maxItems).length;
+  return count || undefined;
+}
+
+function countObjectTextValues(value, maxItems) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const count = Object.values(value).map((item) => String(item || "").trim()).filter(Boolean).slice(0, maxItems).length;
+  return count || undefined;
 }
 
 function removeEmptyValues(value) {
