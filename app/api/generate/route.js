@@ -5,16 +5,19 @@ import {
   shouldFailClosedWhenRestMissing,
   supabaseRestFetch,
 } from "../_supabase.js";
-import { buildSchoolFormatPromptBlock, getSchoolFormatForSchool, summarizeSchoolFormat } from "../_schoolFormat.js";
-import { buildHoikuGuidelinePromptBlock } from "../_hoikuGuideline.js";
+import { getSchoolFormatForSchool, summarizeSchoolFormat } from "../_schoolFormat.js";
+import { buildHoikuGuidelinePromptBlock, buildHoikuPracticumReviewPromptBlock } from "../_hoikuGuideline.js";
 import { enforceRateLimit } from "../_rateLimit.js";
 import { enforceSameOriginRequest } from "../_requestSecurity.js";
 import { readLimitedJsonBody } from "../_jsonRequest.js";
+import { logSafeApiError, logSafeApiWarning } from "../_safeErrorLog.js";
 import {
   buildClientGenerationResponse,
   prepareGenerationPayloadForAi,
   sanitizeGenerationInputForLog,
   sanitizeGenerationOutputForLog,
+  sanitizeLogSessionForLog,
+  sanitizeVisibleAiText,
 } from "../_privacy.js";
 import {
   applyBedrockGuardrail,
@@ -51,7 +54,38 @@ const STAFF_DAILY_GENERATION_LIMIT = parsePositiveIntegerSetting(process.env.MAN
   max: 1000,
 });
 const BEDROCK_GUARDRAIL_MODES = new Set(["off", "compare", "enforce"]);
-const NO_STORE_HEADERS = { "cache-control": "no-store" };
+const GENERATION_KINDS = new Set(["diary", "plan", "student_chat"]);
+const STUDENT_CHAT_STAGES = new Set(["episode", "organize"]);
+const STUDENT_CHAT_TARGETS = new Set([
+  "goal",
+  "goalReflection",
+  "episodeMemo",
+  "episodeInsight",
+  "overallLearning",
+  "nextAction",
+  "memo",
+  "reflection",
+  "tomorrowTask",
+  "feedbackReceived",
+  "feedbackInterpretation",
+  "feedbackUnclear",
+  "feedbackTomorrowAction",
+  "feedbackTeacherQuestion",
+]);
+const STUDENT_CHAT_SCHOOL_FIELD_BY_TARGET = Object.freeze({
+  goalReflection: "goalReflection",
+  episodeMemo: "episodeMemo",
+  memo: "episodeMemo",
+  episodeInsight: "episodeInsight",
+  reflection: "episodeInsight",
+  overallLearning: "overallLearning",
+  nextAction: "nextAction",
+  tomorrowTask: "nextAction",
+});
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const dailyGenerationReservations = globalThis.__manabiDailyGenerationReservations || new Map();
+globalThis.__manabiDailyGenerationReservations = dailyGenerationReservations;
+const publicErrors = new WeakSet();
 
 export const runtime = "nodejs";
 
@@ -105,38 +139,47 @@ export async function POST(request) {
 
     const body = validateGenerationRequest(await readLimitedJson(request, 30000), authContext);
     const privacyCheckedBody = enforceAiPrivacyGate(body);
+    let usageReservation = null;
     if (authContext) {
-      const limitError = await enforceDailyGenerationLimit(authContext);
-      if (limitError) return limitError;
+      usageReservation = await reserveDailyGenerationUsage(authContext, privacyCheckedBody);
+      if (usageReservation instanceof Response) return usageReservation;
     }
-    const guardrailCheckedBody = await applyOptionalBedrockGuardrail(privacyCheckedBody);
 
-    const schoolFormat = authContext?.session?.schoolId ? await loadSchoolFormat(authContext.session.schoolId) : null;
-    const rawContent = await generateContent(guardrailCheckedBody, schoolFormat);
-    rawContent.subscription = guardrailCheckedBody.subscription;
-    if (schoolFormat) {
-      rawContent.schoolFormat = summarizeSchoolFormat(schoolFormat);
+    try {
+      const guardrailCheckedBody = await applyOptionalBedrockGuardrail(privacyCheckedBody);
+
+      const schoolFormat = authContext?.session?.schoolId ? await loadSchoolFormat(authContext.session.schoolId) : null;
+      const rawContent = await generateContent(guardrailCheckedBody, schoolFormat);
+      rawContent.subscription = guardrailCheckedBody.subscription;
+      if (schoolFormat) {
+        rawContent.schoolFormat = summarizeSchoolFormat(schoolFormat);
+      }
+      const generationId = authContext ? await persistGenerationLog(authContext, guardrailCheckedBody, rawContent, usageReservation) : null;
+      const content = buildClientGenerationResponse(rawContent);
+      if (generationId) {
+        content.generationId = generationId;
+      }
+      return jsonNoStore(content);
+    } catch (error) {
+      await markGenerationUsageReservationFailed(authContext, usageReservation);
+      throw error;
+    } finally {
+      releaseLocalGenerationUsageReservation(usageReservation);
     }
-    const generationId = authContext ? await persistGenerationLog(authContext, guardrailCheckedBody, rawContent) : null;
-    const content = buildClientGenerationResponse(rawContent);
-    if (generationId) {
-      content.generationId = generationId;
-    }
-    return jsonNoStore(content);
   } catch (error) {
-    const timedOut = error.name === "TimeoutError";
-    const publicError = error instanceof PublicError;
-    const status = timedOut ? 504 : publicError ? error.status : 500;
+    const publicError = getPublicErrorResponse(error);
+    const timedOut = !publicError && readThrowableString(error, "name") === "TimeoutError";
+    const status = timedOut ? 504 : publicError?.status || 500;
     if (!publicError && !timedOut) {
-      console.error("Generation request failed:", error.details || error.stack || error.message);
+      logSafeApiError(error, "generation_request_failed");
     }
     return jsonNoStore(
       {
-        code: timedOut ? "provider_timeout" : publicError ? error.code : "server_error",
+        code: timedOut ? "provider_timeout" : publicError?.code || "server_error",
         error: timedOut
           ? "AI生成の応答が時間内に返りませんでした。少し時間を置いて再試行してください。"
           : publicError
-            ? error.message
+            ? publicError.message
             : "AI生成処理でエラーが発生しました。入力内容を短くするか、少し時間を置いて再試行してください。",
       },
       { status },
@@ -186,7 +229,7 @@ async function applyOptionalBedrockGuardrail(body) {
         "AI",
       );
     }
-    console.warn("Bedrock Guardrails compare skipped: config missing.");
+    logSafeApiWarning(null, "bedrock_guardrail_config_missing");
     return attachBedrockGuardrailMeta(body, metadata);
   }
 
@@ -211,7 +254,7 @@ async function applyOptionalBedrockGuardrail(body) {
     }
     return attachBedrockGuardrailMeta(body, metadata);
   } catch (error) {
-    if (error instanceof PublicError) throw error;
+    if (isPublicError(error)) throw error;
 
     const metadata = buildBedrockGuardrailLogMeta({
       mode,
@@ -227,7 +270,7 @@ async function applyOptionalBedrockGuardrail(body) {
         "AI",
       );
     }
-    console.warn("Bedrock Guardrails compare failed:", error.name || error.message);
+    logSafeApiWarning(error, "bedrock_guardrail_compare_failed");
     return attachBedrockGuardrailMeta(body, metadata);
   }
 }
@@ -274,6 +317,13 @@ function buildBedrockGuardrailText(kind, payload = {}) {
       time: "活動時間",
       activity: "活動名",
       planMemo: "ねらい・不安な点",
+    },
+    student_chat: {
+      stage: "会話段階",
+      target: "入力欄",
+      practiceGoal: "その日の実習目標",
+      episodeMemo: "出来事のメモ",
+      answer: "学生の一言",
     },
   };
   const labels = labelsByKind[kind] || {};
@@ -335,9 +385,34 @@ function sanitizeBedrockUsage(usage = {}) {
 }
 
 function normalizeBedrockGuardrailErrorReason(error) {
-  if (error?.name === "TimeoutError" || error?.name === "AbortError") return "timeout";
-  if (/config missing/i.test(String(error?.message || ""))) return "missing_config";
+  const name = readThrowableString(error, "name");
+  if (name === "TimeoutError" || name === "AbortError") return "timeout";
+  if (/config missing/i.test(readThrowableString(error, "message"))) return "missing_config";
   return "request_failed";
+}
+
+function readThrowableString(error, property) {
+  try {
+    const value = error?.[property];
+    return typeof value === "string" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+function isPublicError(error) {
+  return publicErrors.has(error);
+}
+
+function getPublicErrorResponse(error) {
+  if (!isPublicError(error)) return null;
+  return {
+    status: Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 500,
+    code: typeof error.code === "string" && error.code ? error.code : "server_error",
+    message: typeof error.message === "string" && error.message
+      ? error.message
+      : "AI生成処理でエラーが発生しました。",
+  };
 }
 
 function isPublicDemoOnly() {
@@ -387,7 +462,7 @@ function validateGenerationRequest(body, authContext) {
   }
 
   const kind = body.kind;
-  if (kind !== "diary" && kind !== "plan") {
+  if (!GENERATION_KINDS.has(kind)) {
     throw new PublicError("生成の種類が不正です。", 400, "invalid_generation_kind", "AI");
   }
   if (kind === "plan" && !isPlanSupportEnabled()) {
@@ -395,6 +470,14 @@ function validateGenerationRequest(body, authContext) {
       "指導案補助は現在のPoC対象外です。実習日誌の整理機能を利用してください。",
       403,
       "plan_generation_disabled",
+      "AI",
+    );
+  }
+  if (kind === "student_chat" && authContext && authContext.session?.role !== "student") {
+    throw new PublicError(
+      "学生チャットは学生アカウントで利用してください。",
+      403,
+      "student_chat_role_forbidden",
       "AI",
     );
   }
@@ -408,7 +491,7 @@ function validateGenerationRequest(body, authContext) {
 
   const provider = hasProviderControl ? normalizeProviderOrThrow(body.provider) : undefined;
   const subscription = resolveServerSubscription(body.subscription, authContext);
-  const payload = kind === "diary" ? normalizeDiaryPayload(body.payload) : normalizePlanPayload(body.payload);
+  const payload = normalizeGenerationPayload(kind, body.payload);
 
   return {
     kind,
@@ -417,6 +500,12 @@ function validateGenerationRequest(body, authContext) {
     provider,
     fallback: allowClientControls && body.fallback === false ? false : true,
   };
+}
+
+function normalizeGenerationPayload(kind, payload) {
+  if (kind === "diary") return normalizeDiaryPayload(payload);
+  if (kind === "plan") return normalizePlanPayload(payload);
+  return normalizeStudentChatPayload(payload);
 }
 
 function normalizeProviderOrThrow(provider) {
@@ -488,6 +577,41 @@ function normalizePlanPayload(payload) {
   };
 }
 
+function normalizeStudentChatPayload(payload) {
+  const source = normalizePayloadObject(payload);
+  const stage = normalizeBoundedText(source.stage, 30, "会話段階");
+  if (!stage) {
+    throw new PublicError("会話段階を指定してください。", 400, "chat_stage_required", "AI");
+  }
+  if (!STUDENT_CHAT_STAGES.has(stage)) {
+    throw new PublicError("会話段階の指定が不正です。", 400, "invalid_chat_stage", "AI");
+  }
+  const target = normalizeBoundedText(source.target, 80, "入力欄");
+  if (!STUDENT_CHAT_TARGETS.has(target)) {
+    throw new PublicError("入力欄の指定が不正です。", 400, "invalid_chat_target", "AI");
+  }
+  const answer = normalizeBoundedText(source.answer, 1200, "一言メモ");
+  if (!hasMeaningfulText(answer)) {
+    throw new PublicError("一言メモを入力してください。", 400, "chat_answer_required", "AI");
+  }
+  const practiceGoal = normalizeBoundedText(source.practiceGoal, 1200, "その日の実習目標");
+  const episodeMemo = normalizeBoundedText(source.episodeMemo, 3000, "出来事のメモ");
+  if (!hasMeaningfulText(practiceGoal)) {
+    throw new PublicError("先にその日の実習目標を入力してください。", 400, "chat_goal_required", "AI");
+  }
+  if (stage === "organize" && !hasMeaningfulText(episodeMemo)) {
+    throw new PublicError("先に出来事を入力してください。", 400, "chat_episode_required", "AI");
+  }
+
+  return {
+    stage,
+    target,
+    practiceGoal,
+    episodeMemo,
+    answer,
+  };
+}
+
 function normalizePayloadObject(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     throw new PublicError("入力内容の形式が不正です。", 400, "invalid_payload", "AI");
@@ -552,37 +676,41 @@ function validateGenerateRuntimeConfig() {
 }
 
 function isProductionLikeRuntime() {
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
+  if (["production", "preview"].includes(vercelEnv)) return true;
+
   const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
   if (["production", "prod", "preview", "staging"].includes(explicitRuntime)) return true;
   if (["development", "dev", "local", "test"].includes(explicitRuntime)) return false;
-
-  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
-  if (["production", "preview"].includes(vercelEnv)) return true;
 
   return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
 }
 
 function isStrictProductionRuntime() {
-  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
-  if (["production", "prod"].includes(explicitRuntime)) return true;
-  if (["preview", "staging", "development", "dev", "local", "test"].includes(explicitRuntime)) return false;
-
   const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
   if (vercelEnv === "production") return true;
   if (["preview", "development"].includes(vercelEnv)) return false;
 
+  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
+  if (["production", "prod"].includes(explicitRuntime)) return true;
+  if (["preview", "staging", "development", "dev", "local", "test"].includes(explicitRuntime)) return false;
+
   return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
 }
 
-async function enforceDailyGenerationLimit(context) {
+async function reserveDailyGenerationUsage(context, body) {
   if (!isRestConfigured()) return null;
 
   const limit = context.session.role === "student" ? STUDENT_DAILY_GENERATION_LIMIT : STAFF_DAILY_GENERATION_LIMIT;
   const todayStart = getJapanDayStartUtcIso();
+  if (shouldUseAtomicGenerationReservation(context)) {
+    return reserveSupabaseGenerationUsage(context, body, { limit, todayStart });
+  }
+
   const rows = await supabaseRestFetch(
-    `/generation_logs?select=id&user_id=eq.${encodeURIComponent(context.user.id)}&created_at=gte.${encodeURIComponent(todayStart)}&limit=${limit + 1}`,
+    `/generation_logs?select=id&user_id=eq.${encodeURIComponent(context.user.id)}&created_at=gte.${encodeURIComponent(todayStart)}&status=in.(reserved,completed)&limit=${limit + 1}`,
   ).catch((error) => {
-    console.warn("Generation limit check failed:", error.details || error.message);
+    logSafeApiWarning(error, "generation_limit_check_failed");
     if (requiresDurableUsageControls(context)) {
       return jsonNoStore(
         {
@@ -597,7 +725,7 @@ async function enforceDailyGenerationLimit(context) {
 
   if (rows instanceof Response) return rows;
   if (!Array.isArray(rows)) return null;
-  if (rows.length < limit) return null;
+  if (rows.length < limit) return reserveLocalGenerationUsage(context, todayStart, limit, rows.length);
 
   return jsonNoStore(
     {
@@ -608,6 +736,113 @@ async function enforceDailyGenerationLimit(context) {
   );
 }
 
+async function reserveSupabaseGenerationUsage(context, body, { limit, todayStart }) {
+  const userId = normalizeUuid(context.user.id);
+  if (!userId) {
+    return jsonNoStore(
+      {
+        code: "invalid_user_context",
+        error: "利用者情報を確認できないため、AI生成を停止しています。",
+      },
+      { status: 403 },
+    );
+  }
+
+  const rows = await supabaseRestFetch("/rpc/reserve_generation_quota", {
+    method: "POST",
+    body: {
+      p_school_id: normalizeUuid(context.session.schoolId),
+      p_class_id: normalizeUuid(context.session.classId),
+      p_user_id: userId,
+      p_kind: cleanLogValue(body.kind, 40),
+      p_provider: "pending",
+      p_subscription: cleanLogValue(body.subscription || "free", 40),
+      p_input: sanitizeGenerationInputForLog(body.kind, body.payload, body.privacyGuard),
+      p_session: buildLogSession(context.session),
+      p_limit: limit,
+      p_day_start: todayStart,
+    },
+  }).catch((error) => {
+    logSafeApiWarning(error, "generation_quota_reservation_failed");
+    if (requiresDurableUsageControls(context)) {
+      return jsonNoStore(
+        {
+          code: "usage_limit_reservation_unavailable",
+          error: "利用上限を安全に予約できないため、AI生成を一時停止しています。少し時間を置いて再試行してください。",
+        },
+        { status: 503 },
+      );
+    }
+    return null;
+  });
+
+  if (rows instanceof Response) return rows;
+  const reservationId = readRpcScalar(rows);
+  if (!reservationId) {
+    return jsonNoStore(
+      {
+        code: "daily_generation_limit",
+        error: "本日のAI生成上限に達しました。学校管理者に利用枠の確認を依頼してください。",
+      },
+      { status: 429 },
+    );
+  }
+  return { mode: "supabase", id: reservationId };
+}
+
+function reserveLocalGenerationUsage(context, todayStart, limit, persistedCount) {
+  const key = `${context.user.id}:${todayStart}`;
+  pruneDailyGenerationReservations();
+  const active = dailyGenerationReservations.get(key) || 0;
+  if (persistedCount + active >= limit) {
+    return jsonNoStore(
+      {
+        code: "daily_generation_limit",
+        error: "本日のAI生成上限に達しました。学校管理者に利用枠の確認を依頼してください。",
+      },
+      { status: 429 },
+    );
+  }
+  dailyGenerationReservations.set(key, active + 1);
+  return { mode: "local", key };
+}
+
+function releaseLocalGenerationUsageReservation(reservation) {
+  if (reservation?.mode !== "local") return;
+  const active = dailyGenerationReservations.get(reservation.key) || 0;
+  if (active <= 1) {
+    dailyGenerationReservations.delete(reservation.key);
+    return;
+  }
+  dailyGenerationReservations.set(reservation.key, active - 1);
+}
+
+function pruneDailyGenerationReservations() {
+  if (dailyGenerationReservations.size <= 2000) return;
+  dailyGenerationReservations.clear();
+}
+
+function shouldUseAtomicGenerationReservation(context) {
+  if (!context?.user?.id) return false;
+  return requiresDurableUsageControls(context) || process.env.MANABI_REQUIRE_ATOMIC_USAGE_RESERVATION === "true";
+}
+
+function readRpcScalar(rows) {
+  if (typeof rows === "string") return rows;
+  if (!Array.isArray(rows)) return "";
+  const first = rows[0];
+  if (typeof first === "string") return first;
+  if (first && typeof first === "object") {
+    return String(first.reserve_generation_quota || first.id || first.value || first.result || "");
+  }
+  return "";
+}
+
+function normalizeUuid(value) {
+  const text = String(value || "").trim();
+  return UUID_PATTERN.test(text) ? text : null;
+}
+
 function getJapanDayStartUtcIso() {
   const japanOffsetMs = 9 * 60 * 60 * 1000;
   const nowInJapan = new Date(Date.now() + japanOffsetMs);
@@ -615,9 +850,13 @@ function getJapanDayStartUtcIso() {
   return new Date(nowInJapan.getTime() - japanOffsetMs).toISOString();
 }
 
-async function persistGenerationLog(context, body, content) {
+async function persistGenerationLog(context, body, content, usageReservation = null) {
   if (!isRestConfigured()) return null;
   const sanitizedOutput = sanitizeGenerationOutputForLog(content);
+
+  if (usageReservation?.mode === "supabase") {
+    return completeGenerationUsageReservation(context, body, content, sanitizedOutput, usageReservation.id);
+  }
 
   const rows = await supabaseRestFetch("/generation_logs", {
     method: "POST",
@@ -636,7 +875,7 @@ async function persistGenerationLog(context, body, content) {
       status: "completed",
     },
   }).catch((error) => {
-    console.warn("Server generation log failed:", error.details || error.message);
+    logSafeApiWarning(error, "generation_log_write_failed");
     if (requiresDurableUsageControls(context)) {
       throw new PublicError(
         "確認記録を保存できないため、AI生成結果を返せません。少し時間を置いて再試行してください。",
@@ -648,7 +887,104 @@ async function persistGenerationLog(context, body, content) {
     return null;
   });
 
-  return rows?.[0]?.id || null;
+  if (rows?.[0]?.id) return rows[0].id;
+  if (requiresDurableUsageControls(context)) {
+    throw new PublicError(
+      "確認記録を更新できないため、AI生成結果を返せません。少し時間を置いて再試行してください。",
+      503,
+      "generation_reservation_not_found",
+      "AI",
+    );
+  }
+  return null;
+}
+
+async function completeGenerationUsageReservation(context, body, content, sanitizedOutput, reservationId) {
+  const id = normalizeUuid(reservationId);
+  const schoolId = normalizeUuid(context.session.schoolId);
+  if (!id) {
+    if (requiresDurableUsageControls(context)) {
+      throw new PublicError(
+        "利用上限の予約情報が不正なため、AI生成結果を返せません。少し時間を置いて再試行してください。",
+        503,
+        "generation_reservation_invalid",
+        "AI",
+      );
+    }
+    return null;
+  }
+  if (!schoolId) {
+    if (requiresDurableUsageControls(context)) {
+      throw new PublicError(
+        "学校情報を確認できないため、AI生成結果を返せません。少し時間を置いて再試行してください。",
+        503,
+        "generation_reservation_school_missing",
+        "AI",
+      );
+    }
+    return null;
+  }
+
+  const rows = await supabaseRestFetch(
+    `/generation_logs?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(context.user.id)}&school_id=eq.${encodeURIComponent(schoolId)}&status=eq.reserved`,
+    {
+      method: "PATCH",
+      body: {
+        provider: content.source || "unknown",
+        output: sanitizedOutput,
+        checks: sanitizedOutput.checks?.length ? sanitizedOutput.checks : null,
+        session: buildLogSession(context.session),
+        subscription: body.subscription || "free",
+        status: "completed",
+      },
+    },
+  ).catch((error) => {
+    logSafeApiWarning(error, "generation_reservation_completion_failed");
+    if (requiresDurableUsageControls(context)) {
+      throw new PublicError(
+        "確認記録を保存できないため、AI生成結果を返せません。少し時間を置いて再試行してください。",
+        503,
+        "generation_log_unavailable",
+        "AI",
+      );
+    }
+    return null;
+  });
+
+  if (rows?.[0]?.id) return rows[0].id;
+  if (requiresDurableUsageControls(context)) {
+    throw new PublicError(
+      "確認記録を更新できないため、AI生成結果を返せません。少し時間を置いて再試行してください。",
+      503,
+      "generation_reservation_not_found",
+      "AI",
+    );
+  }
+  return null;
+}
+
+async function markGenerationUsageReservationFailed(context, reservation) {
+  if (reservation?.mode !== "supabase" || !context?.user?.id) return;
+  const id = normalizeUuid(reservation.id);
+  const schoolId = normalizeUuid(context.session.schoolId);
+  if (!id || !schoolId || !isRestConfigured()) return;
+
+  await supabaseRestFetch(
+    `/generation_logs?id=eq.${encodeURIComponent(id)}&user_id=eq.${encodeURIComponent(context.user.id)}&school_id=eq.${encodeURIComponent(schoolId)}&status=eq.reserved`,
+    {
+      method: "PATCH",
+      body: {
+        status: "failed",
+        provider: "failed",
+        output: {
+          code: "generation_failed",
+        },
+        checks: null,
+      },
+    },
+  ).catch((reservationError) => {
+    logSafeApiWarning(reservationError, "generation_reservation_failure_mark_failed");
+  });
 }
 
 function requiresDurableUsageControls(context) {
@@ -657,31 +993,19 @@ function requiresDurableUsageControls(context) {
 }
 
 function buildLogSession(session = {}) {
-  return {
-    source: session.source || "supabase",
-    userId: session.userId || "",
-    name: session.name || "利用者",
-    role: session.role || "student",
-    roleLabel: session.roleLabel || "",
-    schoolId: session.schoolId || "",
-    classId: session.classId || "",
-    schoolName: session.schoolName || "",
-    schoolPlan: session.schoolPlan || "",
-    contractStatus: session.contractStatus || "",
-    className: session.className || "",
-  };
+  return sanitizeLogSessionForLog(session);
 }
 
 async function loadSchoolFormat(schoolId) {
   if (!isRestConfigured() || !schoolId) return null;
   return getSchoolFormatForSchool(schoolId).catch((error) => {
-    console.warn("School format load skipped:", error.details || error.message);
+    logSafeApiWarning(error, "school_format_load_failed");
     return null;
   });
 }
 
 async function generateContent({ kind, payload, subscription = "free", provider, fallback = true }, schoolFormat = null) {
-  if (!["diary", "plan"].includes(kind)) {
+  if (!GENERATION_KINDS.has(kind)) {
     throw new Error("Invalid generation kind");
   }
 
@@ -705,18 +1029,20 @@ async function generateWithFallback(kind, payload, subscription, providerOverrid
   const fallbackProvider = primaryProvider === "openai" ? "anthropic" : "openai";
   const providers = ALLOW_PROVIDER_FALLBACK ? [primaryProvider, fallbackProvider] : [primaryProvider];
   let lastError = null;
+  let providerFailed = false;
 
   for (const provider of providers) {
     if (!isProviderConfigured(provider)) continue;
     try {
       return await generateWithProvider(provider, kind, payload, subscription, schoolFormat);
     } catch (error) {
+      providerFailed = true;
       lastError = error;
-      console.warn(`${provider} generation failed:`, error.code || error.name || error.message);
+      logSafeApiWarning(error, "provider_generation_failed");
     }
   }
 
-  if (lastError) throw lastError;
+  if (providerFailed) throw lastError;
   throw new PublicError("AI生成設定が未完了です。管理者に連絡してください。", 503, "provider_not_configured", "AI");
 }
 
@@ -746,11 +1072,11 @@ async function generateWithAnthropic(kind, payload, subscription, schoolFormat) 
     },
     body: JSON.stringify({
       model,
-      max_tokens: subscription === "practice" ? 4200 : 1800,
+      max_tokens: kind === "student_chat" ? 800 : subscription === "practice" ? 4200 : 1800,
       temperature: 0.4,
-      system: buildSystemPrompt(subscription, schoolFormat),
+      system: buildSystemPrompt(subscription, kind),
       messages: [
-        { role: "user", content: buildUserPrompt(kind, payload, schoolFormat) },
+        { role: "user", content: buildUserPrompt(kind, payload) },
         { role: "assistant", content: "{" },
       ],
     }),
@@ -771,10 +1097,7 @@ async function generateWithAnthropic(kind, payload, subscription, schoolFormat) 
   try {
     return normalizeGeneratedText(text, "claude", model, kind, schoolFormat, payload);
   } catch (error) {
-    console.error("Claude JSON parse failed:", {
-      responseLength: String(text || "").length,
-      error: error.message,
-    });
+    logSafeApiError(error, "invalid_provider_output");
     throw error;
   }
 }
@@ -791,17 +1114,17 @@ async function generateWithOpenAI(kind, payload, subscription, schoolFormat) {
     body: JSON.stringify({
       model,
       input: [
-        { role: "system", content: buildSystemPrompt(subscription, schoolFormat) },
-        { role: "user", content: buildUserPrompt(kind, payload, schoolFormat) },
+        { role: "system", content: buildSystemPrompt(subscription, kind) },
+        { role: "user", content: buildUserPrompt(kind, payload) },
       ],
       store: false,
-      max_output_tokens: subscription === "practice" ? 2600 : 1300,
+      max_output_tokens: kind === "student_chat" ? 800 : subscription === "practice" ? 2600 : 1300,
       text: {
         format: {
           type: "json_schema",
-          name: "manabi_generation",
+          name: kind === "student_chat" ? "manabi_student_chat" : "manabi_generation",
           strict: true,
-          schema: OUTPUT_SCHEMA,
+          schema: getOutputSchema(kind),
         },
       },
     }),
@@ -821,10 +1144,7 @@ async function generateWithOpenAI(kind, payload, subscription, schoolFormat) {
   try {
     return normalizeGeneratedText(text, "openai", model, kind, schoolFormat, payload);
   } catch (error) {
-    console.error("OpenAI JSON parse failed:", {
-      responseLength: String(text || "").length,
-      error: error.message,
-    });
+    logSafeApiError(error, "invalid_provider_output");
     throw error;
   }
 }
@@ -885,6 +1205,8 @@ class PublicError extends Error {
     this.status = status;
     this.code = code;
     this.provider = provider;
+    publicErrors.add(this);
+    Object.freeze(this);
   }
 }
 
@@ -951,7 +1273,60 @@ const OUTPUT_SCHEMA = {
   },
 };
 
-function buildSystemPrompt(subscription, schoolFormat = null) {
+const STUDENT_CHAT_OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["acknowledgement", "nextQuestion", "fieldHint", "safetyNote", "organization"],
+  properties: {
+    acknowledgement: { type: "string" },
+    nextQuestion: { type: "string" },
+    fieldHint: { type: "string" },
+    safetyNote: { type: "string" },
+    organization: {
+      type: "object",
+      additionalProperties: false,
+      required: ["factSummary", "goalConnection", "professionalReview", "missingInformation"],
+      properties: {
+        factSummary: { type: "string" },
+        goalConnection: { type: "string" },
+        professionalReview: {
+          type: "object",
+          additionalProperties: false,
+          required: ["focusText", "reason", "revisionPrompt"],
+          properties: {
+            focusText: { type: "string" },
+            reason: { type: "string" },
+            revisionPrompt: { type: "string" },
+          },
+        },
+        missingInformation: { type: "string" },
+      },
+    },
+  },
+};
+
+function getOutputSchema(kind) {
+  return kind === "student_chat" ? STUDENT_CHAT_OUTPUT_SCHEMA : OUTPUT_SCHEMA;
+}
+
+function buildSystemPrompt(subscription, kind = "diary") {
+  if (kind === "student_chat") {
+    return [
+      "あなたは保育者養成課程の実習生を支援する、日本語のチャット支援アシスタントです。",
+      "学生が先に書いた実習目標、出来事、追加回答だけを材料に、次の問いまたは編集用の短い整理案を返します。",
+      "完成した提出文、模範解答、学生が確認せずそのまま提出する文章は返しません。学校日誌の書き出し補助はサーバー側の固定された未完成テンプレートで作るため、本文として生成しません。",
+      "学生の学習状況を序列化せず、提出前の整理に必要な問いだけを返します。",
+      "入力にない出来事、子どもの内面、保育者の意図、発話、場所、時間帯、結果を補完しません。",
+      "子どもや実習先を特定しうる情報があれば、A児、実習先園、担任職員のような匿名表現へ戻す注意を短く返します。",
+      buildHoikuPracticumReviewPromptBlock(),
+      "stage=episodeでは、organizationの全項目を空文字にし、観察できた事実を補う次の問いを一問だけ返します。",
+      "stage=organizeでは、organizationを埋めます。factSummaryは事実だけ、goalConnectionは実習目標とのつながり、professionalReviewは入力中の該当箇所・専門的な理由・直すための一問、missingInformationは不足する事実を尋ねる一問です。",
+      "acknowledgement は40字以内。nextQuestion は一問だけ、90字以内。fieldHint は100字以内。safetyNote は80字以内。organizationの各項目は220字以内です。",
+      "JSONオブジェクトのみを返します。前置き、後書き、Markdown、コードブロックは禁止です。",
+      'スキーマ: {"acknowledgement": string, "nextQuestion": string, "fieldHint": string, "safetyNote": string, "organization": {"factSummary": string, "goalConnection": string, "professionalReview": {"focusText": string, "reason": string, "revisionPrompt": string}, "missingInformation": string}}',
+    ].join("\n");
+  }
+
   const premium = subscription === "practice";
   return [
     "あなたは保育士・幼稚園教諭養成課程の実習生を支援する、日本語の省察支援・提出前安全確認アシスタントです。",
@@ -998,7 +1373,6 @@ function buildSystemPrompt(subscription, schoolFormat = null) {
     "悪い例:『〜が抜けています』『〜が不十分です』『〜は抽象的です』。",
     "個人情報を推測・補完せず、入力にない固有名、園名、診断名、家庭情報を書かないでください。",
     buildHoikuGuidelinePromptBlock("common"),
-    buildSchoolFormatPromptBlock("common", schoolFormat),
     premium
       ? [
           "【実習パス版】観察事実・学生自身の考察・明日の観察視点・教員に確認したい点を分け、問い返しとして深めてください。",
@@ -1021,7 +1395,34 @@ function buildSystemPrompt(subscription, schoolFormat = null) {
   ].join("\n");
 }
 
-function buildUserPrompt(kind, payload, schoolFormat = null) {
+function buildUserPrompt(kind, payload) {
+  if (kind === "student_chat") {
+    return [
+      "【種類】学生チャットの問い返しと整理",
+      "",
+      "【現在の入力欄】",
+      `・stage: ${payload.stage}`,
+      `・target: ${payload.target}`,
+      "",
+      "【ここまでに学生が書いた内容】",
+      `・その日の実習目標: ${payload.practiceGoal || "（未入力）"}`,
+      `・出来事のメモ: ${payload.episodeMemo || "（未入力）"}`,
+      "",
+      "【学生の一言】",
+      payload.answer,
+      "",
+      "【返す内容】",
+      "・acknowledgement: 学生の一言を短く受け止める。評価や褒め言葉ではなく、入力された事実を受けたことを示す。",
+      "・nextQuestion: 次に一つだけ考えればよい問い。stage=episodeでは、子どもの姿、自分の関わり、その後に見られた変化のうち、入力にない一点だけを聞く。",
+      "・fieldHint: 学校フォーマットのどの欄につながるかを短く示す。",
+      "・safetyNote: 実名、園名、家庭事情、診断名、実習先を特定する情報が入っていないかの確認。問題がなければ『実名や園名が入っていないかだけ確認します。』程度に留める。",
+      "・organization: stage=episodeでは全項目を空文字にする。stage=organizeでは学生の入力だけを根拠に各項目を埋める。",
+      "・professionalReview.focusText: 見直す箇所を、episodeMemoまたはanswerから60字以内でそのまま抜き出す。入力にない言葉へ言い換えない。",
+      "・professionalReview.reason: その箇所を見直す理由を、保育の専門的な観点から短く示す。5領域は必要な場合だけ根拠を添えて扱い、分類だけで終えない。",
+      "・professionalReview.revisionPrompt: 学生が次に確認・追記する内容を一問だけ示す。",
+    ].join("\n");
+  }
+
   if (kind === "plan") {
     return [
       "【種類】指導案補助",
@@ -1033,8 +1434,6 @@ function buildUserPrompt(kind, payload, schoolFormat = null) {
       `・ねらい・不安な点: ${payload.planMemo || "（未入力）"}`,
       "",
       buildHoikuGuidelinePromptBlock("plan"),
-      "",
-      buildSchoolFormatPromptBlock("plan", schoolFormat),
       "",
       "【sectionsの構成（headingsと同順）】",
       "1. 活動概要 — 学生が書いた活動名・内容を、指導案の冒頭にふさわしい簡潔な記述に整える。活動内容を勝手に増やさない。",
@@ -1078,8 +1477,6 @@ function buildUserPrompt(kind, payload, schoolFormat = null) {
     buildToneInstruction(payload.tone),
     "",
     buildHoikuGuidelinePromptBlock("diary"),
-    "",
-    buildSchoolFormatPromptBlock("diary", schoolFormat),
     "",
     "【sectionsの構成（headingsと同順）】",
     "1. エピソードの整理 — 日付・天気・年齢・場面・ねらいを確認し、学生が記録したエピソードと未記入の情報を分ける。情景描写は学生メモにある範囲のみ。",
@@ -1126,6 +1523,10 @@ function buildToneInstruction(tone) {
 
 function normalizeGeneratedText(text, source, model, kind = "diary", schoolFormat = null, payload = {}) {
   const parsed = typeof text === "string" ? JSON.parse(extractJson(text)) : text;
+  if (kind === "student_chat") {
+    return normalizeStudentChatGeneratedText(parsed, source, model, payload, schoolFormat);
+  }
+
   if (!Array.isArray(parsed.headings) || !Array.isArray(parsed.sections) || !Array.isArray(parsed.checks)) {
     throw new Error("Invalid response shape");
   }
@@ -1134,7 +1535,7 @@ function normalizeGeneratedText(text, source, model, kind = "diary", schoolForma
   const fallbackHeadings = kind === "plan"
     ? schoolFormat?.planHeadings || DEFAULT_PLAN_HEADINGS
     : schoolFormat?.diaryHeadings || DEFAULT_DIARY_HEADINGS;
-  const headings = normalizeFixedOutputList(parsed.headings, fallbackHeadings, 5);
+  const headings = normalizeFixedOutputList([], fallbackHeadings, 5);
   const sections = normalizeFixedOutputList(parsed.sections, DEFAULT_EMPTY_SECTIONS, 5, outputGuard);
   const checks = normalizeChecks(parsed.checks, outputGuard, kind);
 
@@ -1145,6 +1546,104 @@ function normalizeGeneratedText(text, source, model, kind = "diary", schoolForma
     source,
     model,
   };
+}
+
+function normalizeStudentChatGeneratedText(parsed, source, model, payload = {}, schoolFormat = null) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Invalid student chat response shape");
+  }
+  const outputGuard = buildOutputGuard(payload);
+  const organization = payload.stage === "organize"
+    ? normalizeStudentChatOrganization(parsed.organization, outputGuard, payload)
+    : createEmptyStudentChatOrganization();
+  return {
+    kind: "student_chat",
+    stage: payload.stage,
+    target: payload.target,
+    acknowledgement: normalizeStudentChatOutputField(
+      parsed.acknowledgement,
+      "一言を受け取りました。",
+      80,
+      outputGuard,
+    ),
+    nextQuestion: normalizeStudentChatOutputField(
+      parsed.nextQuestion,
+      getFallbackStudentChatQuestion(payload.target, payload.stage),
+      120,
+      outputGuard,
+    ),
+    fieldHint: getFallbackStudentChatFieldHint(payload.target, schoolFormat),
+    safetyNote: normalizeStudentChatOutputField(
+      parsed.safetyNote,
+      "実名や園名が入っていないかだけ確認します。",
+      120,
+      outputGuard,
+    ),
+    organization,
+    source,
+    model,
+  };
+}
+
+function normalizeStudentChatOrganization(value, outputGuard, payload) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    factSummary: normalizeStudentChatOutputField(source.factSummary, "", 260, outputGuard),
+    goalConnection: normalizeStudentChatOutputField(source.goalConnection, "", 260, outputGuard),
+    professionalReview: normalizeStudentChatProfessionalReview(source.professionalReview, outputGuard, payload),
+    reflectionStarter: STUDENT_CHAT_REFLECTION_STARTER,
+    fieldStarters: buildStudentChatFixedFieldStarters(),
+    missingInformation: normalizeStudentChatOutputField(source.missingInformation, "", 160, outputGuard),
+  };
+}
+
+function normalizeStudentChatProfessionalReview(value, outputGuard, payload = {}) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const inputText = [payload.episodeMemo, payload.answer]
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join(" ");
+  const requestedFocus = normalizeStudentChatOutputField(source.focusText, "", 60, outputGuard);
+  const focusText = requestedFocus && inputText.includes(requestedFocus)
+    ? requestedFocus
+    : inputText.slice(0, 60);
+  return {
+    focusText,
+    reason: normalizeStudentChatOutputField(
+      source.reason,
+      "観察した事実と自分の解釈を分けると、振り返りの根拠が明確になります。",
+      220,
+      outputGuard,
+    ),
+    revisionPrompt: normalizeStudentChatOutputField(
+      source.revisionPrompt,
+      "どこまでが見た事実で、どこからが自分の考えかを確認できますか。",
+      160,
+      outputGuard,
+    ),
+  };
+}
+
+const STUDENT_CHAT_REFLECTION_STARTER = "この場面で見た【観察した事実】から、私は【自分の気づき】と考えた。";
+const STUDENT_CHAT_FIELD_STARTER_FALLBACKS = Object.freeze({
+  goalReflection: "実習目標と【目標につながった場面】を見比べ、【自分が考えたこと】を足す。",
+  episodeInsight: "この場面で見た【観察した事実】から、【自分の気づき】を考える。",
+  overallLearning: "今日の場面を通して、【共通して気づいたこと】を【保育者として大切にしたいこと】へつなげる。",
+  nextAction: "明日は【見る場面】で、【確認したい姿や関わり】を一つ見る。",
+});
+
+function buildStudentChatFixedFieldStarters() {
+  return {
+    goalReflection: STUDENT_CHAT_FIELD_STARTER_FALLBACKS.goalReflection,
+    episodeInsight: STUDENT_CHAT_FIELD_STARTER_FALLBACKS.episodeInsight,
+    overallLearning: STUDENT_CHAT_FIELD_STARTER_FALLBACKS.overallLearning,
+    nextAction: STUDENT_CHAT_FIELD_STARTER_FALLBACKS.nextAction,
+  };
+}
+
+function normalizeStudentChatOutputField(value, fallback, maxLength, outputGuard) {
+  const text = sanitizeOutputText(String(value || ""), outputGuard).replace(/\s+/g, " ").trim();
+  return (text || fallback).slice(0, maxLength);
 }
 
 const DEFAULT_DIARY_HEADINGS = ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "教員への相談"];
@@ -1207,11 +1706,14 @@ function sanitizeOutputText(text, outputGuard = null) {
     next = redactSensitiveNames(next, outputGuard);
     next = replaceRiskTerms(next, outputGuard);
   }
-  return next.replace(/\s{2,}/g, " ").trim();
+  return sanitizeVisibleAiText(next.replace(/\s{2,}/g, " ").trim(), 1200);
 }
 
 function buildOutputGuard(payload = {}) {
   const inputText = [
+    payload.practiceGoal,
+    payload.episodeMemo,
+    payload.answer,
     payload.memo,
     payload.reflection,
     payload.tomorrowTask,
@@ -1282,7 +1784,137 @@ function extractJson(text) {
 }
 
 function buildMock(kind, payload, subscription, schoolFormat = null) {
+  if (kind === "student_chat") return buildStudentChatMock(payload, schoolFormat);
   return kind === "plan" ? buildPlanMock(payload, subscription, schoolFormat) : buildDiaryMock(payload, subscription, schoolFormat);
+}
+
+function buildStudentChatMock(payload, schoolFormat = null) {
+  const organization = payload.stage === "organize"
+    ? buildStudentChatOrganizationMock(payload)
+    : createEmptyStudentChatOrganization();
+  return {
+    kind: "student_chat",
+    stage: payload.stage,
+    target: payload.target,
+    acknowledgement: "一言を欄に保存しました。",
+    nextQuestion: getFallbackStudentChatQuestion(payload.target, payload.stage),
+    fieldHint: getFallbackStudentChatFieldHint(payload.target, schoolFormat),
+    safetyNote: "実名や園名が入っていないかだけ確認します。",
+    organization,
+    source: "mock",
+  };
+}
+
+function getFallbackStudentChatQuestion(target, stage = "legacy") {
+  if (stage === "episode") return "その時、自分はどのように関わり、その後どのような姿が見られましたか。";
+  if (stage === "organize") return "整理案と元メモを見比べ、事実と違う部分がないか確認してください。";
+  if (target === "episodeMemo") return "その場面を見て、保育者として何が大切だと感じましたか。";
+  if (target === "episodeInsight") return "明日、同じような場面で何を一つ見ますか。";
+  if (target === "goalReflection") return "目標とつながった場面を、一つだけ具体的にするとどうなりますか。";
+  if (target === "overallLearning") return "その気づきを、明日の行動に一つつなげるなら何を見ますか。";
+  if (target === "nextAction") return "学校フォーマットで、今の一言を自分の言葉に直してみましょう。";
+  if (target?.startsWith("feedback")) return "受けた助言を、明日見る子どもの姿に戻すと何を見ますか。";
+  return "次に、実際に見たことを一つだけ足すなら何ですか。";
+}
+
+function createEmptyStudentChatOrganization() {
+  return {
+    factSummary: "",
+    goalConnection: "",
+    professionalReview: createEmptyStudentChatProfessionalReview(),
+    reflectionStarter: "",
+    fieldStarters: {
+      goalReflection: "",
+      episodeInsight: "",
+      overallLearning: "",
+      nextAction: "",
+    },
+    missingInformation: "",
+  };
+}
+
+function createEmptyStudentChatProfessionalReview() {
+  return {
+    focusText: "",
+    reason: "",
+    revisionPrompt: "",
+  };
+}
+
+function buildStudentChatOrganizationMock(payload = {}) {
+  const goal = String(payload.practiceGoal || "").trim();
+  const episode = String(payload.episodeMemo || "").trim();
+  const detail = String(payload.answer || "").trim();
+  const sourceText = [episode, detail].filter(Boolean).join(" ");
+  const factSummary = sourceText.slice(0, 260);
+  return {
+    factSummary,
+    goalConnection: goal
+      ? `実習目標「${goal.slice(0, 100)}」と、この出来事のどの部分がつながるかを、見た事実から確認します。`
+      : "実習目標が未入力のため、出来事とのつながりはまだ決めません。",
+    professionalReview: buildMockProfessionalReview(sourceText),
+    reflectionStarter: STUDENT_CHAT_REFLECTION_STARTER,
+    fieldStarters: buildStudentChatFixedFieldStarters(),
+    missingInformation: "記録した内容と違う部分や、まだ書けていない子どもの姿はありますか。",
+  };
+}
+
+function buildMockProfessionalReview(episode) {
+  const focusText = String(episode || "").slice(0, 60);
+  if (/友だち|一緒|やりとり|順番|貸|渡/.test(episode)) {
+    return {
+      focusText,
+      reason: "子ども同士の関わりは、関係性を評価せず、実際のやり取りと援助を分けて捉える必要があります。5領域の「人間関係」も、この姿を振り返る補助的な観点になります。",
+      revisionPrompt: "やり取りの前後に見た子どもの姿と、自分がした関わりを分けて追記できますか。",
+    };
+  }
+  if (/話|言葉|声|伝え|聞/.test(episode)) {
+    return {
+      focusText,
+      reason: "発話そのものと、そこから考えたことを分けると、伝え合う姿を具体的な事実から捉えられます。5領域の「言葉」も、この姿を振り返る補助的な観点になります。",
+      revisionPrompt: "実際に聞いた言葉と、その前後に見た姿を分けて追記できますか。",
+    };
+  }
+  if (/描|作|歌|音|表現/.test(episode)) {
+    return {
+      focusText,
+      reason: "作った物の評価ではなく、素材・動き・音などを使う過程を観察事実として捉えることが重要です。5領域の「表現」も、この過程を振り返る補助的な観点になります。",
+      revisionPrompt: "素材の扱い方や言葉など、実際に観察できた姿を追記できますか。",
+    };
+  }
+  if (/走|食|着替|排泄|休|体/.test(episode)) {
+    return {
+      focusText,
+      reason: "できた・できないで評価せず、身体や生活に関する具体的な姿と援助を分けて捉えることが重要です。5領域の「健康」も、この過程を振り返る補助的な観点になります。",
+      revisionPrompt: "子どもが自分でしていたことと、自分が援助したことを分けて追記できますか。",
+    };
+  }
+  if (/玩具|道具|素材|場所|環境|ブロック/.test(episode)) {
+    return {
+      focusText,
+      reason: "環境を通して行う保育では、物・空間・時間と子どもの活動の関係を、見た事実から捉えることが重要です。",
+      revisionPrompt: "道具の配置や使い方と、その後に見られた子どもの姿を追記できますか。",
+    };
+  }
+  return {
+    focusText,
+    reason: "観察した事実と自分の解釈を区別すると、省察の根拠が明確になります。",
+    revisionPrompt: "どこまでが見た事実で、どこからが自分の考えかを確認できますか。",
+  };
+}
+
+function getFallbackStudentChatFieldHint(target, schoolFormat = null) {
+  const schoolFieldKey = STUDENT_CHAT_SCHOOL_FIELD_BY_TARGET[target];
+  const schoolLabel = schoolFieldKey && typeof schoolFormat?.studentDiaryFieldLabels?.[schoolFieldKey] === "string"
+    ? schoolFormat.studentDiaryFieldLabels[schoolFieldKey].trim().slice(0, 80)
+    : "";
+  if (schoolLabel) return `${schoolLabel}へつながる一言です。次の画面で自分の言葉に直します。`;
+  if (target === "episodeMemo") return "エピソードの場面欄へ入り、次はその場面からの気づきを考えます。";
+  if (target === "episodeInsight") return "エピソードから得た気づき欄へ入り、次は明日の一点へつなげます。";
+  if (target === "nextAction") return "次の日取り組みたいことの欄へ入ります。";
+  if (target === "goalReflection") return "実習目標に対する振り返り欄へ入ります。";
+  if (target === "overallLearning") return "総合的な気づきの欄へ入ります。";
+  return "学校フォーマットの該当欄へ入ります。";
 }
 
 function buildDiaryMock(payload, subscription, schoolFormat = null) {
@@ -1314,12 +1946,12 @@ function buildDiaryMock(payload, subscription, schoolFormat = null) {
       childSection,
       "学生自身の考えは、根拠となる観察事実と結びついているか確認したい。実習生の意図、行ったこと、見られた子どもの姿を分け、保育者の意図は入力にない限り断定しない。",
       hasFeedback
-        ? `実習先指導員からの助言として「${payload.feedbackReceived || payload.feedbackInterpretation}」が要約されている。明日はこの助言を、子どもの言葉、使っていた物、自分の声かけ前後の姿など、記録できる観察事実に戻して確認したい。`
+        ? "実習先指導員からの助言が入力されている。明日はこの助言を、子どもの言葉、使っていた物、自分の声かけ前後の姿など、記録できる観察事実に戻して確認したい。"
         : premium
           ? "明日は、同じ場面で子どもの具体的な行動、実習生の声かけ、関わり後の姿を記録できているか確認したい。5領域や保育所保育指針は、領域名の追加ではなく観察を見直す問いとして扱う。"
           : "明日は、同じ場面で子どもの具体的な行動、実習生の声かけ、関わり後の姿を記録できているか確認したい。",
       hasFeedback
-        ? `学校の担当教員には、実習先で受けた助言の理解が合っているか、明日見る観察事実をどこまで絞ればよいかを確認したい。${payload.feedbackTeacherQuestion || ""}`.trim()
+        ? "学校の担当教員には、実習先で受けた助言の理解が合っているか、明日見る観察事実をどこまで絞ればよいかを確認したい。"
         : "学校の担当教員には、保育者の関わりを日誌に書く範囲、自分の考察として書いてよい範囲、明日の観察で特に見る点を確認したい。",
     ],
     checks: [
@@ -1336,14 +1968,16 @@ function buildDiaryMock(payload, subscription, schoolFormat = null) {
 function buildPlanMock(payload, subscription, schoolFormat = null) {
   const premium = subscription === "practice";
   const title = payload.activity || "子どもの興味を生かした活動";
-  const concern = payload.planMemo || "活動の流れ、導入、安全面を整理したい。";
+  const hasPlanMemo = String(payload.planMemo || "").trim().length > 0;
   const headings = schoolFormat?.planHeadings || ["活動概要", "ねらい", "環境構成", "展開と援助", "相談ポイント"];
 
   return {
     headings,
     sections: [
       `${payload.age}を対象に、${payload.time}程度で行う「${title}」の指導案である。活動内容は学生メモに書かれた範囲で整理し、未定の部分は担当教員に確認したい。`,
-      `ねらいは、学生メモにある不安や意図をもとに整理する。不安な点は「${concern}」であり、年齢や活動内容に合っているか確認したい。`,
+      hasPlanMemo
+        ? "ねらいは、学生メモにある不安や意図をもとに整理する。入力された不安や相談点を、年齢や活動内容に合っているか確認したい。"
+        : "ねらいは、活動名と対象年齢をもとに仮置きせず、担当教員に確認する点として整理したい。",
       "材料、場所、人数、配置、時間配分が未入力の場合は、本文で補わず、実際の環境を確認してから追記する必要がある。",
       premium
         ? "展開が未定の場合は、具体的な活動手順を創作せず、導入、展開、まとめで何を確認すべきかを整理する。援助は、安全面、参加しづらい子への関わり、活動の終え方を教員に相談したい。"
