@@ -1290,6 +1290,10 @@ function buildClasswideLessonBacklog(classwideSignals = []) {
       key: `classroom_${normalizeDiaryFieldKey(signal.key) || "practice"}`,
       label: signal.label || "共通テーマ",
       studentCount: clampCount(signal.studentCount, 100),
+      supportStudentIds: safeList(signal.supportStudentIds)
+        .map((value) => normalizeSafeToken(value, ""))
+        .filter((value) => /^support-[a-z0-9]{7}-[a-z0-9]{7}$/.test(value))
+        .slice(0, 100),
       classQuestion: practice.classQuestion,
       miniTask: practice.miniTask,
       teacherNote: practice.teacherNote,
@@ -1822,6 +1826,10 @@ export function buildPostPracticumSupportPackage(events = [], options = {}) {
       key,
       label: getDiaryFieldLabel(key, fieldLabels),
       studentCount: fieldMissingCounts[key],
+      supportStudentIds: students
+        .filter((student) => student.missingRequiredFields.includes(key))
+        .map((student) => student.supportStudentId)
+        .sort(),
       teachingPrompt: getTeachingPromptForField(key),
     }))
     .filter((signal) => signal.studentCount >= 2);

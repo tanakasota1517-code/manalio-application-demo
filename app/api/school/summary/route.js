@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { getServerSessionContext, isRestConfigured, shouldFailClosedWhenRestMissing, supabaseRestFetch } from "../../_supabase.js";
-import { enforceRateLimit } from "../../_rateLimit.js";
+import { enforceRateLimit, enforceScopedRateLimit } from "../../_rateLimit.js";
 import { enforceSameOriginRequest } from "../../_requestSecurity.js";
 import { buildSchoolSummaryInputPreview } from "../../_schoolSummaryPreview.mjs";
 import {
@@ -50,8 +50,8 @@ export async function GET(request) {
   if (sameOriginResponse) return sameOriginResponse;
 
   const rateLimitResponse = enforceRateLimit(request, {
-    namespace: "school-summary",
-    limit: 90,
+    namespace: "school-summary-ip",
+    limit: 1000,
     windowMs: 10 * 60 * 1000,
   });
   if (rateLimitResponse) return rateLimitResponse;
@@ -91,6 +91,12 @@ export async function GET(request) {
     if (!context.user?.id) {
       return Response.json({ error: "ログインが必要です。" }, { status: 401 });
     }
+    const userRateLimitResponse = enforceScopedRateLimit(context.user.id, {
+      namespace: "school-summary-user",
+      limit: 90,
+      windowMs: 10 * 60 * 1000,
+    });
+    if (userRateLimitResponse) return userRateLimitResponse;
     if (!["teacher", "admin"].includes(context.session?.role)) {
       return Response.json({ error: "教員向け画面は教員・管理者のみ利用できます。" }, { status: 403 });
     }

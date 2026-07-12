@@ -77,6 +77,11 @@ function normalizeProcessStudentKey(value) {
   return "";
 }
 
+function normalizeSupportStudentId(value) {
+  const id = safeCopyText(value, 120);
+  return /^support-[a-z0-9]{7}-[a-z0-9]{7}$/.test(id) ? id : "";
+}
+
 function getThemeStudentId(item = {}) {
   return normalizeStudentId(item.studentId || item.userId);
 }
@@ -295,6 +300,12 @@ export function buildTeacherStudentSummaries(studentUsage = [], recentLogs = [],
 export function mergeTeacherStudentsWithProcessSupport(students = [], supportPackage = {}, options = {}) {
   const roster = safeRecordList(students).map((student) => ({ ...student }));
   const processStudents = safeRecordList(supportPackage?.students);
+  const classShareSupportStudentIds = new Set(
+    safeRecordList(supportPackage?.classwideLessonBacklog)
+      .flatMap((item) => safeList(item.supportStudentIds))
+      .map(normalizeSupportStudentId)
+      .filter(Boolean),
+  );
   const rosterByProcessKey = new Map(
     roster
       .map((student, index) => [normalizeProcessStudentKey(student.processStudentKey), index])
@@ -305,11 +316,19 @@ export function mergeTeacherStudentsWithProcessSupport(students = [], supportPac
     const rosterIndex = processKey ? rosterByProcessKey.get(processKey) : undefined;
     if (rosterIndex === undefined) {
       if (options.includeUnmatchedProcessStudents === true) {
-        roster.push(mergeStudentWithProcessSupport(buildProcessOnlyStudent(support, roster.length), support));
+        roster.push(mergeStudentWithProcessSupport(
+          buildProcessOnlyStudent(support, roster.length),
+          support,
+          classShareSupportStudentIds.has(normalizeSupportStudentId(support.supportStudentId)),
+        ));
       }
       continue;
     }
-    roster[rosterIndex] = mergeStudentWithProcessSupport(roster[rosterIndex], support);
+    roster[rosterIndex] = mergeStudentWithProcessSupport(
+      roster[rosterIndex],
+      support,
+      classShareSupportStudentIds.has(normalizeSupportStudentId(support.supportStudentId)),
+    );
   }
 
   return roster;
@@ -339,7 +358,7 @@ function buildProcessOnlyStudent(support = {}, fallbackIndex = 0) {
   };
 }
 
-function mergeStudentWithProcessSupport(student = {}, support = {}) {
+function mergeStudentWithProcessSupport(student = {}, support = {}, isClassShareStudent = false) {
   const routeKey = safeCopyText(support.returnPreparation?.routeKey || support.supportAction?.routeKey, 40);
   const stageLabels = safeList(support.recordedStageLabels).map((label) => normalizeTeacherDisplayText(label, 40)).filter(Boolean);
   const processCheckpoints = [
@@ -369,7 +388,7 @@ function mergeStudentWithProcessSupport(student = {}, support = {}) {
     latestAt: latestTimestamp(student.latestAt, support.latestAt || `${support.processDate || ""}T00:00:00.000Z`),
     diaryCount: Math.max(toCount(student.diaryCount), toCount(support.processDateCount), support.processDate ? 1 : 0),
     teacherCheckCount: Math.max(toCount(student.teacherCheckCount), routeKey === "teacher_check" ? 1 : 0),
-    classShareCount: Math.max(toCount(student.classShareCount), routeKey === "class_activity" ? 1 : 0),
+    classShareCount: Math.max(toCount(student.classShareCount), routeKey === "class_activity" || isClassShareStudent ? 1 : 0),
     selfCheckCount: Math.max(toCount(student.selfCheckCount), routeKey === "student_return" ? 1 : 0),
     hasUsage: true,
     checkpoints: checkpoints.length ? checkpoints : safeList(student.checkpoints),
@@ -704,11 +723,27 @@ export function buildClassShareThemes(checkSummary = [], reviewQueue = []) {
 
 export function mergeClassShareThemes(primaryThemes = [], secondaryThemes = []) {
   const themes = new Map();
-  for (const item of [...safeRecordList(primaryThemes), ...safeRecordList(secondaryThemes)]) {
-    const label = normalizeTeacherDisplayText(item.label, 80);
-    if (!label || hasSensitiveDisplayToken(label)) continue;
-    const suppliedKey = safeCopyText(item.themeKey, 120);
-    const themeKey = /^[a-z0-9_:-]+$/i.test(suppliedKey) ? suppliedKey : `label:${label}`;
+  const preparedItems = [...safeRecordList(primaryThemes), ...safeRecordList(secondaryThemes)]
+    .map((item) => {
+      const label = normalizeTeacherDisplayText(item.label, 80);
+      const suppliedKey = safeCopyText(item.themeKey, 120);
+      const explicitKey = /^[a-z0-9_:-]+$/i.test(suppliedKey) && !suppliedKey.toLowerCase().startsWith("label:")
+        ? suppliedKey
+        : "";
+      return { item, label, explicitKey };
+    })
+    .filter(({ label }) => label && !hasSensitiveDisplayToken(label));
+  const explicitKeysByLabel = new Map();
+  for (const { label, explicitKey } of preparedItems) {
+    if (!explicitKey) continue;
+    if (!explicitKeysByLabel.has(label)) explicitKeysByLabel.set(label, new Set());
+    explicitKeysByLabel.get(label).add(explicitKey);
+  }
+
+  for (const { item, label, explicitKey } of preparedItems) {
+    const matchingExplicitKeys = explicitKeysByLabel.get(label);
+    const soleExplicitKey = matchingExplicitKeys?.size === 1 ? matchingExplicitKeys.values().next().value : "";
+    const themeKey = explicitKey || soleExplicitKey || `label:${label}`;
     const current = themes.get(themeKey) || { ...item, themeKey, label, count: 0, studentCount: 0 };
     current.count += toCount(item.count);
     current.studentCount = Math.max(current.studentCount, toCount(item.studentCount));
