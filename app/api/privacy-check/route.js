@@ -2,6 +2,8 @@ import { enforceRateLimit } from "../_rateLimit.js";
 import { readLimitedJsonBody } from "../_jsonRequest.js";
 import { prepareGenerationPayloadForAi } from "../_privacy.js";
 import { enforceSameOriginRequest } from "../_requestSecurity.js";
+import { logSafeApiError } from "../_safeErrorLog.js";
+import { getPublicErrorDetails, registerPublicError } from "../_publicError.js";
 
 export const runtime = "nodejs";
 
@@ -117,19 +119,17 @@ export async function POST(request) {
       },
     );
   } catch (error) {
-    const publicError = error instanceof PrivacyCheckError;
+    const publicError = getPublicErrorDetails(error);
     if (!publicError) {
-      console.error("Privacy check failed:", error.stack || error.message);
+      logSafeApiError(error, "privacy_check_failed");
     }
     return Response.json(
       {
-        code: publicError ? error.code : "privacy_check_failed",
-        error: publicError
-          ? error.message
-          : "安全確認を完了できませんでした。少し時間を置いて再試行してください。",
+        code: publicError?.code || "privacy_check_failed",
+        error: publicError?.publicMessage || "安全確認を完了できませんでした。少し時間を置いて再試行してください。",
       },
       {
-        status: publicError ? error.status : 500,
+        status: publicError?.status || 500,
         headers: {
           "cache-control": "no-store",
         },
@@ -285,5 +285,6 @@ class PrivacyCheckError extends Error {
     this.name = "PrivacyCheckError";
     this.status = status;
     this.code = code;
+    registerPublicError(this, { code, publicMessage: message, status });
   }
 }
