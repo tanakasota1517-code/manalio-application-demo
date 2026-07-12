@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  collectPrivacyScanTextValues,
   createContactLabelPattern,
   createFamilyInfoPattern,
   createGuardianNamePattern,
@@ -11,13 +12,48 @@ import {
   createPhonePattern,
   normalizePrivacyScanText,
 } from "./privacyPatterns.js";
+import {
+  buildClassShareLessonPlans,
+  buildClassShareThemes,
+  buildSafeTeacherLogDisplays,
+  buildTeacherStudentSummaries,
+  getKindLabel,
+  mergeClassShareThemes,
+  mergeTeacherStudentsWithProcessSupport,
+} from "./teacher-dashboard-model.mjs";
+import {
+  buildStudentChatDiaryStarterPatch,
+  buildStudentDiaryFieldLabels,
+  buildStudentDiaryRequirements,
+  buildStudentFinalCheckRecoveryGuide,
+  buildStudentRevisionChecklist,
+  buildStudentRevisionOrder,
+  buildStudentSelfReviewPrompts,
+  buildStudentWritingCoach,
+  getStudentChatOrganizationForComparison,
+  getStudentDraftEditReadiness,
+  hasStudentDiaryEpisodeContent,
+  hasStudentWrittenText,
+  isStudentChatSourceCurrent,
+  mergeStudentChatDiaryStarterPatch,
+  setStudentFieldScaffold,
+} from "./student-diary-support.mjs";
+import {
+  buildPostPracticumSupportPackage,
+  buildDemoContextKey,
+  buildStudentProcessSwitchMarker,
+  buildStudentProcessEvent,
+  createDemoStudentId,
+  isExpectedStudentProcessPersistenceSkipCode,
+  mergeStudentProcessEvents,
+  normalizeDemoStudentId,
+  serializeStudentProcessEventsForStorage,
+  STUDENT_PROCESS_EVENT_STORAGE_KEY,
+  STUDENT_PROCESS_SWITCH_STORAGE_KEY,
+} from "./student-process-events.mjs";
 
-const LIMITS = {
-  freeDailyUses: 2,
-  practiceDailyUses: 10,
-  adBonusLimit: 3,
-};
 const ENABLE_LOG_EXPORTS = process.env.NEXT_PUBLIC_MANABI_ENABLE_LOG_EXPORTS === "true";
+const ENABLE_STUDENT_PROCESS_PERSISTENCE = process.env.NEXT_PUBLIC_MANABI_ENABLE_STUDENT_PROCESS_PERSISTENCE === "true";
 const ALLOW_STORED_DEMO_SESSION = process.env.NEXT_PUBLIC_MANABI_SHOW_DEMO_SHORTCUTS === "true";
 const ACCESS_LOG_SURFACE = "teacher_preview";
 
@@ -62,9 +98,53 @@ const FAMILY_INFO_DETECTION_PATTERN = createFamilyInfoPattern("i");
 const FAMILY_INFO_REDACTION_PATTERN = createFamilyInfoPattern("gi");
 const GUARDIAN_NAME_DETECTION_PATTERN = createGuardianNamePattern();
 const GUARDIAN_NAME_REDACTION_PATTERN = createGuardianNamePattern("g");
+const FACILITY_LABEL_SOURCE =
+  "認定こども園名|こども園名|保育園名|保育所名|幼稚園名|ナーサリー名|キッズ園名|園名|実習先名|施設名";
+const FACILITY_LABEL_PREFIX_SOURCE =
+  "(?:実習先の|施設の|学校の|学校が指定する|学校指定の|指定する|各|該当の|対象の|日誌の|様式の|記入欄の|入力欄の|この|その|当該)?";
+const FACILITY_LABEL_TOKEN_SOURCE = `${FACILITY_LABEL_PREFIX_SOURCE}(?:${FACILITY_LABEL_SOURCE})`;
+const FACILITY_LABEL_QUALIFIER_SOURCE = "(?:(?:の)?(?:欄|項目)|の場合|場合)?";
+const FACILITY_LABEL_PARTICLE_SOURCE = "(?:には|では|として|は|へ|に|を)";
+const FACILITY_LABEL_SEPARATOR_SOURCE = "[:：=＝>＞→⇒\\-ー−–—・/／、,，;；|｜（(【「『\\[［《〈〔<＜{｛]";
+const FACILITY_LABEL_BRACKET_OPEN_SOURCE = "[（(【「『\\[［《〈〔<＜{｛]";
+const FACILITY_LABEL_BRACKET_CLOSE_SOURCE = "[）)】」』\\]］》〉〕>＞}｝]";
+const FACILITY_LABELS = new Set(FACILITY_LABEL_SOURCE.split("|"));
+const FACILITY_LABEL_PATTERN = new RegExp(`(?:${FACILITY_LABEL_SOURCE})`, "g");
+const FACILITY_NAME_LIKE_PATTERN =
+  /([一-龯ぁ-んァ-ンA-Za-z0-9０-９〇○々ヶヵー・]{1,30})[\s　\-ー−–—・/／]*(認定こども園|こども園|保育園|保育所|幼稚園|ナーサリー|キッズ園)名?/;
+const FACILITY_NAME_REDACTION_PATTERN =
+  /([一-龯ぁ-んァ-ンA-Za-z0-9０-９〇○々ヶヵー・]{1,30})[\s　\-ー−–—・/／]*(認定こども園|こども園|保育園|保育所|幼稚園|ナーサリー|キッズ園)名?/g;
+const FACILITY_LABEL_VALUE_REDACTION_PATTERN = new RegExp(
+  `(^|[\\s　、。,.：:【（(「『])(${FACILITY_LABEL_TOKEN_SOURCE})(?:${FACILITY_LABEL_QUALIFIER_SOURCE})(?:\\s*${FACILITY_LABEL_SEPARATOR_SOURCE}\\s*|\\s+)(?!(?:${FACILITY_LABEL_TOKEN_SOURCE})|(?:には|では|として|は|へ|を|に|と|や|及び|並びに|または|又は))([^、。\\n\\r】）)」』]{1,80})`,
+  "g",
+);
+const FACILITY_LABEL_BRACKET_VALUE_REDACTION_PATTERN = new RegExp(
+  `(^|[\\s　、。,.：:【（(「『])(${FACILITY_LABEL_TOKEN_SOURCE})(?:${FACILITY_LABEL_QUALIFIER_SOURCE})\\s*${FACILITY_LABEL_BRACKET_OPEN_SOURCE}\\s*([^）)】」』\\]］》〉〕>＞}｝\\n\\r]{1,40})\\s*${FACILITY_LABEL_BRACKET_CLOSE_SOURCE}[^。\\n\\r]{0,40}`,
+  "g",
+);
+const FACILITY_LABEL_HA_VALUE_REDACTION_PATTERN = new RegExp(
+  `(^|[\\s　、。,.：:【（(「『・/／\\-ー−–—])(${FACILITY_LABEL_TOKEN_SOURCE})(?:${FACILITY_LABEL_QUALIFIER_SOURCE})\\s*${FACILITY_LABEL_PARTICLE_SOURCE}\\s*([^。\\n\\r】）)」』]{1,80})`,
+  "g",
+);
+const SAFE_FACILITY_LABEL_TAIL_PATTERN =
+  /^(?:(?:入力しない|記入しない|記入不要|書かない|記載しない|載せない)(?:こと|でください|ようにする|してください|ようにしてください|ようお願いします|ようお願いいたします)?|避け(?:る|てください|ること|るようにする|るようにしてください|るようお願いします|るようお願いいたします)?|(?:確認|削除|省略|マスキング|匿名化)(?:する|してください|できている|できています|するようにしてください|するようお願いします|するようお願いいたします)?|(?:置き換え|置換)(?:る|する|てください)?|伏せ字(?:にする|で扱う|で残す)?|(?:安全な表現|安全な形|別の表現|匿名表現|置換済み表現|実習先園|担任職員|主任職員|学校の教員|A児|B児|C児|D児|E児)(?:(?:に|へ)(?:置き換え(?:る)?|置換する?|する|してください)|として(?:扱う|使う|残す)|で(?:扱う|使う|残す))?)(?:[、,]\s*(?:学生本人の言葉を残す|入力にない事実を補わない|記録にない事実を補わない|安全な表現に整える))*$/;
+const SCHOOL_NAME_FLAG_PATTERN = /(保育園|保育所|幼稚園|認定こども園|こども園|ナーサリー|キッズ園|園名|実習先名|施設名)/;
+const TEACHER_DISPLAY_EVALUATION_WORD = ["評価", "語"].join("");
+const TEACHER_DISPLAY_EVALUATION_DIAGNOSIS = ["評価", "・診断"].join("");
 
 const defaultSchoolFormat = {
   diaryHeadings: ["エピソードの整理", "気づきの確認", "表現の確認", "明日の観察", "教員への相談"],
+  studentDiaryFieldLabels: {
+    goalReflection: "その日の実習目標に対する振り返り",
+    episodeMemo: "エピソード",
+    episodeInsight: "エピソードから得た気づき",
+    overallLearning: "保育者として大切にしなければならないことの気づき",
+    nextAction: "次の日取り組みたいこと",
+  },
+  studentDiaryRequirements: {
+    requiredFields: ["goalReflection", "episodeMemo", "episodeInsight", "overallLearning", "nextAction"],
+    episodes: { initialCount: 2, requiredCount: 1, minCount: 1, maxCount: 4 },
+  },
   planHeadings: ["活動概要", "ねらい", "環境構成", "展開と援助", "相談ポイント"],
   checkRules: ["個人名の置換・マスキング", "断定表現の確認", "未入力項目の明示", "保育所保育指針の観点", "学校の担当教員への相談点"],
   writingStyle: "学生が自分で書いた記録に対して、完成文ではなく問い返し・安全確認・相談点として返す。",
@@ -77,7 +157,7 @@ const STUDENT_NAV_ITEMS = [
 const STUDENT_FLOW_STEPS = [
   ["input", "記入", "学校フォーマット"],
   ["confirm", "安全確認", "表現を確認"],
-  ["revise", "比較", "叩き台と直す"],
+  ["revise", "比較", "整理案と直す"],
   ["final", "提出前", "記録を確認"],
 ];
 
@@ -99,14 +179,9 @@ const CLIENT_FIELD_LABELS = {
 };
 
 const STAFF_NAV_ITEMS = [
-  ["school", "確認ダッシュボード"],
-  ["assignments", "実習前後の課題"],
-  ["students", "学生一覧"],
-  ["review", "確認レビュー"],
-  ["formats", "フォーマット"],
-  ["pass", "導入プラン"],
+  ["school", "実習後支援"],
 ];
-const PUBLIC_DEMO_HIDDEN_STAFF_VIEWS = new Set(["assignments", "students", "review", "formats", "pass"]);
+const STAFF_VIEW_IDS = STAFF_NAV_ITEMS.map(([view]) => view);
 
 const diarySamples = [
   {
@@ -217,19 +292,23 @@ const demoReviewQueue = [
     handling: "student_self",
     handlingLabel: "学生本人",
     handlingDetail: "教員の個別確認ではなく、学生本人への提出前の自己確認で返す候補です。",
+    studentId: "demo-student-1",
     studentName: "学生A",
+    placementId: "demo-placement-a",
     createdAt: new Date().toISOString(),
   },
   {
     id: "risky-demo",
     generationId: "demo-log-2",
-    title: "評価語を含むメモ",
+    title: "断定表現を含むメモ",
     tag: "表現確認",
-    detail: "子どもへの評価・診断に近い表現が入力に含まれていた可能性があります。",
+    detail: "子どもへの決めつけや診断に近い表現が入力に含まれていた可能性があります。",
     handling: "class_share",
     handlingLabel: "授業共有",
     handlingDetail: "個別添削ではなく、授業内でまとめて扱う候補です。",
+    studentId: "demo-student-2",
     studentName: "学生B",
+    placementId: "demo-placement-b",
     createdAt: new Date().toISOString(),
   },
   {
@@ -239,9 +318,11 @@ const demoReviewQueue = [
     tag: "補完疑い",
     detail: "学生メモに根拠がない発達効果や場面描写が含まれていないか確認する候補です。",
     handling: "teacher_now",
-    handlingLabel: "当日確認",
-    handlingDetail: "個人情報や重大な表現リスクとして、当日中に教員が見る候補です。",
+    handlingLabel: "教員確認",
+    handlingDetail: "個人情報や重大な表現リスクとして、学校教員が提出後に確認する候補です。",
+    studentId: "demo-student-2",
     studentName: "学生B",
+    placementId: "demo-placement-b",
     createdAt: new Date().toISOString(),
   },
   {
@@ -251,9 +332,11 @@ const demoReviewQueue = [
     tag: "置換確認",
     detail: "子ども名・職員名など、置き換え確認が必要な情報が含まれていた可能性があります。",
     handling: "teacher_now",
-    handlingLabel: "当日確認",
-    handlingDetail: "個人情報や重大な表現リスクとして、当日中に教員が見る候補です。",
+    handlingLabel: "教員確認",
+    handlingDetail: "個人情報や重大な表現リスクとして、学校教員が提出後に確認する候補です。",
+    studentId: "demo-student-3",
     studentName: "学生C",
+    placementId: "demo-placement-b",
     createdAt: new Date().toISOString(),
   },
   {
@@ -265,40 +348,10 @@ const demoReviewQueue = [
     handling: "class_share",
     handlingLabel: "授業共有",
     handlingDetail: "個別添削ではなく、授業内で観察を見直す観点として扱う候補です。",
+    studentId: "demo-student-4",
     studentName: "学生D",
+    placementId: "demo-placement-a",
     createdAt: new Date().toISOString(),
-  },
-];
-
-const reviewActions = [
-  { id: "resolved", label: "確認済み", template: "教員確認済み。学生本人への追加対応は不要です。" },
-  { id: "class", label: "授業で扱う", template: "同じつまずきが複数見られるため、授業共有テーマとして扱います。" },
-  { id: "individual", label: "個別確認", template: "個人情報や表現リスクがあるため、該当学生を個別に確認します。" },
-  { id: "student", label: "学生に再確認", template: "提出前に、観察事実・表現・学校の担当教員に確認したい点を学生本人へ見直してもらいます。" },
-];
-
-const reviewRouteFilters = [
-  { value: "すべて", label: "すべて", detail: "全候補" },
-  { value: "高", label: "当日確認", detail: "個別に見る" },
-  { value: "中", label: "授業共有", detail: "まとめて扱う" },
-  { value: "低", label: "学生本人", detail: "自己確認へ" },
-];
-
-const reviewRouteGuide = [
-  {
-    label: "当日確認",
-    action: "今日、教員が見る",
-    detail: "個人情報・要配慮情報・強い断定など、早めに止めたい候補。",
-  },
-  {
-    label: "授業共有",
-    action: "授業でまとめて扱う",
-    detail: "複数の学生に共通しそうな観察・表現のつまずき。",
-  },
-  {
-    label: "学生本人",
-    action: "提出前の自己確認へ戻す",
-    detail: "入力不足や見直しで整えられる候補。学生本人の確認へ戻す。",
   },
 ];
 
@@ -309,8 +362,10 @@ const demoRecentLogs = [
     provider: "claude",
     model: "demo",
     createdAt: new Date().toISOString(),
+    studentId: "demo-student-1",
     studentName: "学生A",
     className: "保育実習I / 2年A組",
+    placementId: "demo-placement-a",
     inputPreview: "ブロックで遊んでいた子がいた。私も一緒に遊んだ。",
     outputPreview: "入力された範囲で分かる事実と、学生本人が追記すべき問いを分ける。",
     sections: [
@@ -327,15 +382,17 @@ const demoRecentLogs = [
     provider: "claude",
     model: "demo",
     createdAt: new Date().toISOString(),
+    studentId: "demo-student-2",
     studentName: "学生B",
     className: "保育実習I / 2年A組",
+    placementId: "demo-placement-b",
     inputPreview: "片付けの時間に席を立つ子がいて、声をかけた。うまくいったと思う。",
     outputPreview: "実習生の関わりの意図と、実際に見られた子どもの姿を分けて問い返す。",
     sections: [
       { heading: "援助の振り返り", body: "声をかけたことは記録されているが、声かけの内容や、その後に見られた子どもの姿は未記入である。" },
       { heading: "明日に向けて", body: "切り替え場面で、子どもが見通しをもてる関わりになっていたかを学校の担当教員に確認したい。" },
     ],
-    checks: ["声かけの具体的な内容は記録できていますか。", "子どもの反応を評価語ではなく姿として書けていますか。", "保育所保育指針や5領域の観点と、実際に見た姿はつながっていますか。"],
+    checks: ["声かけの具体的な内容は記録できていますか。", "子どもの反応を断定せず、姿として書けていますか。", "保育所保育指針や5領域の観点と、実際に見た姿はつながっていますか。"],
     checkCount: 3,
     reviewTags: ["確認多め", "指針確認"],
   },
@@ -345,8 +402,10 @@ const demoRecentLogs = [
     provider: "claude",
     model: "demo",
     createdAt: new Date().toISOString(),
+    studentId: "demo-student-3",
     studentName: "学生C",
     className: "保育実習I / 2年A組",
+    placementId: "demo-placement-b",
     inputPreview: "子ども名1くんがスプーンを持ったまま皿を見ていた。担任教員名1は近くで様子を見ていた。",
     outputPreview: "個人名をA児・実習先の担任教員へ置き換えた上で、食事場面の観察事実と確認点を分ける。",
     sections: [
@@ -363,8 +422,10 @@ const demoRecentLogs = [
     provider: "claude",
     model: "demo",
     createdAt: new Date().toISOString(),
+    studentId: "demo-student-4",
     studentName: "学生D",
     className: "保育実習I / 2年A組",
+    placementId: "demo-placement-a",
     inputPreview: "戸外で友だちの使っていた縄跳びを見ていた子がいた。私は『やってみる？』と声をかけた。",
     outputPreview: "見た姿と声かけを分け、5領域とのつながりは本文の水増しではなく提出前の問いとして残す。",
     sections: [
@@ -380,101 +441,17 @@ const demoRecentLogs = [
 const demoCheckSummary = [
   { tag: "追記促し", count: 4 },
   { tag: "確認多め", count: 3 },
-  { tag: "表現確認", count: 2 },
+  { tag: "表現確認", count: 2, studentCount: 1 },
   { tag: "置換確認", count: 1 },
   { tag: "補完疑い", count: 1 },
-  { tag: "指針確認", count: 1 },
+  { tag: "指針確認", count: 2, studentCount: 2 },
 ];
 
 const demoStudentUsage = [
   { id: "demo-student-1", name: "学生A", email: "student@example.ac.jp", generations: 4, diary: 4, plan: 0, reviewCandidates: 2, latestAt: new Date().toISOString() },
   { id: "demo-student-2", name: "学生B", email: "student2@example.ac.jp", generations: 2, diary: 2, plan: 0, reviewCandidates: 1, latestAt: new Date().toISOString() },
-];
-
-const demoPocMetrics = [
-  { label: "翌日行動化", value: "3/4件", detail: "実習先で受けた指導を、翌日の観察や行動に置き換えられた件数" },
-  { label: "教員確認負担", value: "1/5件", detail: "教員が当日確認する候補だけに絞った件数" },
-  { label: "学生の負担感", value: "聞き取りで確認", detail: "学生に何が見えるかを説明し、負担感・抵抗感を短いアンケートで確認" },
-];
-
-const teacherPreviewCheckpoints = [
-  {
-    kicker: "学生画面",
-    title: "迷わず使えるか",
-    detail: "入力、安全確認、問い返し、学生が自分で書いた記録の提出前チェックの順番が、自然かを確認します。",
-  },
-  {
-    kicker: "実習先助言",
-    title: "翌日の観察へ戻せるか",
-    detail: "実習先で受けた助言が、学生の反省で止まらず、翌日の見る点や相談点に変わるかを見ます。",
-  },
-  {
-    kicker: "教員画面",
-    title: "次の支援に使えるか",
-    detail: "個別に見る、授業で扱う、学生本人に戻す、という対応先の分け方が実際の運用に合うかを見ます。",
-  },
-  {
-    kicker: "学校フォーマット",
-    title: "残したい見出しが合うか",
-    detail: "学校の日誌様式に合わせるため、残したい見出しや提出前の確認観点を見ます。",
-  },
-];
-
-const teacherPreviewReturnItems = [
-  "授業で先に確認したい点",
-  "教員画面に出ると役立つ情報・出ない方がよい情報",
-  "学校フォーマットに合わせて残したい見出し",
-];
-
-const formatReviewQuestions = [
-  {
-    kicker: "日誌様式",
-    title: "残したい見出し",
-    detail: "学校の実習日誌で必ず残したい欄名、順番、文体を確認します。",
-  },
-  {
-    kicker: "提出前確認",
-    title: "毎年直している表現",
-    detail: "個人名、園名、評価語、入力不足など、学校として特に見たい観点を確認します。",
-  },
-  {
-    kicker: "保存範囲",
-    title: "教員が見返したい段階",
-    detail: "安全確認後の本文、問い返し、学生が自分で書いた記録の提出前チェックのうち、どこを教員確認や授業共有に残すかを確認します。",
-  },
-];
-
-const assignmentTemplates = [
-  {
-    title: "観察メモを事実・考察・問いに分ける",
-    type: "実習準備",
-    due: "実習開始2週間前",
-    target: "2年生 全クラス",
-    completion: 72,
-    signals: ["入力不足", "考察欄", "実習担当教員への相談"],
-  },
-  {
-    title: "評価語を観察表現に直す",
-    type: "AIリテラシー",
-    due: "次回授業まで",
-    target: "保育実習I",
-    completion: 64,
-    signals: ["評価語", "断定表現", "子どもの姿"],
-  },
-  {
-    title: "日誌の考察を5領域の観点で見直す",
-    type: "実習準備",
-    due: "実習開始1週間前",
-    target: "2年生 全クラス",
-    completion: 58,
-    signals: ["指針確認", "子どもの姿", "考察"],
-  },
-];
-
-const commonMistakes = [
-  { label: "入力が短すぎる", count: 18, detail: "出来事だけで、場面・関わり・子どもの反応が不足しやすい。" },
-  { label: "評価語が残る", count: 11, detail: "落ち着き、やる気、できる/できない等の表現が出やすい。" },
-  { label: "相談点が出ない", count: 9, detail: "AIの問いを完成文として受け取り、学校の担当教員へ確認する観点が弱い。" },
+  { id: "demo-student-3", name: "学生C", email: "student3@example.ac.jp", generations: 1, diary: 1, plan: 0, reviewCandidates: 1, latestAt: new Date().toISOString() },
+  { id: "demo-student-4", name: "学生D", email: "student4@example.ac.jp", generations: 1, diary: 1, plan: 0, reviewCandidates: 1, latestAt: new Date().toISOString() },
 ];
 
 function getLocalDateKey(date = new Date()) {
@@ -488,11 +465,16 @@ function normalizeMultiline(value) {
   return normalizePrivacyScanText(value).replace(/\r\n/g, "\n").trim().replace(/\n{3,}/g, "\n\n");
 }
 
-function createInitialDiary(date = "") {
+function createInitialDiary(date = "", schoolFormat = defaultSchoolFormat) {
+  const { initialCount } = buildStudentDiaryRequirements(schoolFormat).episodes;
   return {
     ...initialDiary,
     date,
-    episodes: initialDiary.episodes.map((episode) => ({ ...episode })),
+    episodes: Array.from({ length: initialCount }, (_, index) => (
+      initialDiary.episodes[index]
+        ? { ...initialDiary.episodes[index] }
+        : createDiaryEpisode(index + 1)
+    )),
   };
 }
 
@@ -506,7 +488,7 @@ function createDiaryEpisode(index, overrides = {}) {
   };
 }
 
-function normalizeDiaryEpisodes(episodes, fallbackMemo = "", fallbackInsight = "") {
+function normalizeDiaryEpisodes(episodes, fallbackMemo = "", fallbackInsight = "", fallbackCount = 2) {
   const source = Array.isArray(episodes) ? episodes : [];
   const normalized = source
     .map((episode, index) => createDiaryEpisode(index + 1, {
@@ -519,21 +501,23 @@ function normalizeDiaryEpisodes(episodes, fallbackMemo = "", fallbackInsight = "
 
   if (normalized.length > 0) return normalized;
 
-  return [
-    createDiaryEpisode(1, { memo: normalizeMultiline(fallbackMemo), insight: normalizeMultiline(fallbackInsight) }),
-    createDiaryEpisode(2),
-  ];
+  const safeFallbackCount = Math.max(1, Math.min(8, Number(fallbackCount) || 2));
+  return Array.from({ length: safeFallbackCount }, (_, index) => createDiaryEpisode(index + 1, {
+    memo: index === 0 ? normalizeMultiline(fallbackMemo) : "",
+    insight: index === 0 ? normalizeMultiline(fallbackInsight) : "",
+  }));
 }
 
-function buildDiaryMemoText(diary = {}) {
+function buildDiaryMemoText(diary = {}, schoolFormat = defaultSchoolFormat) {
   const episodes = normalizeDiaryEpisodes(diary.episodes, diary.memo, diary.reflection);
+  const fieldLabels = buildStudentDiaryFieldLabels(schoolFormat);
   const blocks = [];
   const goalReflection = normalizeMultiline(diary.goalReflection);
   const overallLearning = normalizeMultiline(diary.overallLearning);
   const nextAction = normalizeMultiline(diary.nextAction);
 
   if (goalReflection) {
-    blocks.push(`【その日の実習目標に対する振り返り】\n${goalReflection}`);
+    blocks.push(`【${fieldLabels.goalReflection}】\n${goalReflection}`);
   }
 
   for (const [index, episode] of episodes.entries()) {
@@ -541,18 +525,18 @@ function buildDiaryMemoText(diary = {}) {
     const insight = normalizeMultiline(episode.insight);
     if (!memo && !insight) continue;
     blocks.push([
-      `【エピソード${index + 1}】`,
+      `【${fieldLabels.episodeMemo}${index + 1}】`,
       memo,
-      insight ? `気づき・感じたこと: ${insight}` : "",
+      insight ? `${fieldLabels.episodeInsight}: ${insight}` : "",
     ].filter(Boolean).join("\n"));
   }
 
   if (overallLearning) {
-    blocks.push(`【保育者として大切にしなければならないことの気づき】\n${overallLearning}`);
+    blocks.push(`【${fieldLabels.overallLearning}】\n${overallLearning}`);
   }
 
   if (nextAction) {
-    blocks.push(`【次の日取り組みたいこと】\n${nextAction}`);
+    blocks.push(`【${fieldLabels.nextAction}】\n${nextAction}`);
   }
 
   return blocks.join("\n\n").trim() || normalizeMultiline(diary.memo);
@@ -566,17 +550,67 @@ function buildDiaryTomorrowText(diary = {}) {
   return normalizeMultiline(diary.nextAction) || normalizeMultiline(diary.tomorrowTask);
 }
 
-function hasDiaryInputText(diary = {}) {
-  return hasMeaningfulText(buildDiaryMemoText(diary));
-}
-
 function hasMeaningfulText(value) {
   const signalChars = normalizePrivacyScanText(value).match(/[一-龯ぁ-んァ-ンA-Za-z0-9０-９]/g) || [];
   return signalChars.length >= 2;
 }
 
-function buildDiaryGenerationPayload(diary, feedback, tone) {
-  const memo = buildDiaryMemoText(diary);
+function hasStudentAuthoredText(value) {
+  return hasStudentWrittenText(value);
+}
+
+function buildStudentMinimumPathItems(diary = {}, schoolFormat = {}) {
+  const coach = buildStudentWritingCoach(diary, {}, schoolFormat);
+  const missingTargets = new Set(safeRecordList(coach.safetyCheckBlockers).map((item) => item.target));
+  const coachItems = safeRecordList(coach.items);
+  const episodeMemoItem = coachItems.find((item) => item.id === "episode-memo");
+  const insightItem = coachItems.find((item) => item.id === "episode-insight");
+  const overallLearningItem = coachItems.find((item) => item.id === "overall-learning");
+  const nextActionItem = coachItems.find((item) => item.id === "next-action");
+  const insightDoneByEpisode = Boolean(insightItem?.done);
+  const insightDoneByOverall = !insightDoneByEpisode && Boolean(overallLearningItem?.done);
+  const insightTarget = insightDoneByOverall ? overallLearningItem.target : insightItem?.target || "episodeInsight";
+  const insightFormatLabel = insightDoneByOverall ? overallLearningItem?.formatLabel : insightItem?.formatLabel;
+  const insightBody = insightDoneByOverall
+    ? "総合的な気づきに書いたことを確認する"
+    : insightDoneByEpisode
+      ? "その場面から感じたことを確認する"
+      : "その場面から感じたことを一つ書く";
+  return [
+    {
+      label: "一場面",
+      title: "見たこと",
+      body: "子どもの姿と自分の関わりを一つ書く",
+      formatLabel: episodeMemoItem?.formatLabel,
+      target: "episodeMemo",
+      done: !missingTargets.has("episodeMemo"),
+    },
+    {
+      label: "一つの気づき",
+      title: "考えたこと",
+      body: insightBody,
+      formatLabel: insightFormatLabel,
+      target: insightTarget,
+      done: !missingTargets.has("episodeInsight"),
+    },
+    {
+      label: "明日の一点",
+      title: "次に見ること",
+      body: "明日見ること、試すことを一つ書く",
+      formatLabel: nextActionItem?.formatLabel,
+      target: "nextAction",
+      done: !missingTargets.has("nextAction"),
+    },
+  ];
+}
+
+function hasMinimumStudentDiaryInput(diary = {}, feedback = {}, schoolFormat = {}) {
+  return buildStudentWritingCoach(diary, feedback, schoolFormat).readyForSafetyCheck;
+}
+
+function buildDiaryGenerationPayload(diary, feedback, tone, schoolFormat = defaultSchoolFormat) {
+  const fieldLabels = buildStudentDiaryFieldLabels(schoolFormat);
+  const memo = buildDiaryMemoText(diary, schoolFormat);
   const reflection = buildDiaryReflectionText(diary);
   const tomorrowTask = buildDiaryTomorrowText(diary);
   return {
@@ -591,13 +625,9 @@ function buildDiaryGenerationPayload(diary, feedback, tone) {
     feedbackUnclear: normalizeMultiline(feedback.unclear),
     feedbackTomorrowAction: normalizeMultiline(feedback.tomorrowAction),
     feedbackTeacherQuestion: normalizeMultiline(feedback.teacherQuestion),
+    studentDiaryFieldLabels: fieldLabels,
     tone,
   };
-}
-
-function getSourceLabel(source) {
-  if (source === "openai" || source === "claude" || source === "anthropic") return "AI支援";
-  return "省察支援";
 }
 
 function getSavedFeedbackRecords(key) {
@@ -623,22 +653,25 @@ const APP_LOCAL_STORAGE_KEYS = [
   "manabi-demo-session",
   "manabi-diary-feedback",
   "manabi-generation-logs",
-  "manabi-practice-pass-demo",
+  STUDENT_PROCESS_EVENT_STORAGE_KEY,
+  STUDENT_PROCESS_SWITCH_STORAGE_KEY,
 ];
 
-function clearAppLocalStorage() {
+function clearAppLocalStorage({ preserveStudentProcessEvents = false } = {}) {
   try {
     for (const key of APP_LOCAL_STORAGE_KEYS) {
+      if (preserveStudentProcessEvents && key === STUDENT_PROCESS_EVENT_STORAGE_KEY) continue;
       localStorage.removeItem(key);
-    }
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith("manabi-diary-usage-")) {
-        localStorage.removeItem(key);
-      }
     }
   } catch {
     // localStorage may be unavailable in hardened browser settings.
   }
+}
+
+function saveStudentProcessSwitch(session) {
+  const marker = buildStudentProcessSwitchMarker(session);
+  if (!marker) return;
+  safeSetLocalStorage(STUDENT_PROCESS_SWITCH_STORAGE_KEY, JSON.stringify(marker));
 }
 
 function csvCell(value) {
@@ -661,8 +694,6 @@ function removeInternalAiFields(value) {
 function safeExportSession(session) {
   if (!session || typeof session !== "object") return {};
   return {
-    schoolName: safeCopyText(session.schoolName, 80),
-    className: safeCopyText(session.className, 80),
     role: safeCopyText(session.role, 40),
     roleLabel: safeCopyText(session.roleLabel, 40),
   };
@@ -684,8 +715,10 @@ function buildPublicDemoSession(role = "student") {
     roleLabel: safeRole === "teacher" ? "教員" : "学生",
     name: safeRole === "teacher" ? "実習担当教員" : "実習生",
     email: safeRole === "teacher" ? "teacher@example.ac.jp" : "student@example.ac.jp",
+    demoStudentId: safeRole === "student" ? "public-demo-student" : "",
     schoolName: "さくら保育者養成校",
     className: "保育実習I / 2年A組",
+    schoolFormat: defaultSchoolFormat,
     signedInAt: new Date().toISOString(),
   };
 }
@@ -701,14 +734,20 @@ function normalizeStoredDemoSession(session) {
   if (session.source !== "demo") return null;
   const role = session.role === "teacher" ? "teacher" : session.role === "student" ? "student" : null;
   if (!role) return null;
+  const demoStudentId = role === "student"
+    ? normalizeDemoStudentId(session.demoStudentId, createDemoStudentId())
+    : "";
   return {
     source: "demo",
     role,
     roleLabel: role === "teacher" ? "教員" : "学生",
     name: safeCopyText(session.name || (role === "teacher" ? "実習担当教員" : "実習生"), 80),
     email: safeCopyText(session.email || "", 120),
+    demoStudentId: safeCopyText(demoStudentId, 120),
+    studentProcessContextKey: buildDemoContextKey(session),
     schoolName: safeCopyText(session.schoolName || "", 120),
     className: safeCopyText(session.className || "", 120),
+    schoolFormat: normalizeClientTemplate(session.schoolFormat || defaultSchoolFormat),
     signedInAt: safeCopyText(session.signedInAt || "", 80),
   };
 }
@@ -718,6 +757,7 @@ function buildInputSummary(input = {}, existingSummary = {}) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return safeExisting;
   return {
     ...safeExisting,
+    preview: safeExisting.preview,
     date: safeCopyText(input.date, 30),
     age: safeCopyText(input.age, 40),
     scene: safeCopyText(input.scene, 80),
@@ -735,6 +775,7 @@ function buildInputSummary(input = {}, existingSummary = {}) {
 function safeExistingInputSummary(summary = {}) {
   if (!summary || typeof summary !== "object" || Array.isArray(summary)) return {};
   return {
+    preview: safeCopyText(summary.preview, 180),
     date: safeCopyText(summary.date, 30),
     age: safeCopyText(summary.age, 40),
     scene: safeCopyText(summary.scene, 80),
@@ -795,13 +836,64 @@ function normalizePossiblyAnonymizedTeacherReference(raw, name) {
   return null;
 }
 
+function redactFacilityName(raw, name, facility) {
+  const compact = `${name}${facility}${raw.endsWith("名") ? "名" : ""}`;
+  return FACILITY_LABELS.has(compact) || isAbstractFacilityReference(raw) ? raw : "〈園名〉";
+}
+
+function redactFacilityLabelValue(raw, prefix = "", _label = "", tail = "") {
+  return isSafeAbstractFacilityLabelRule(tail) ? raw : `${prefix}〈園名〉`;
+}
+
+function isAbstractFacilityReference(value) {
+  const remainder = String(value || "")
+    .replace(FACILITY_LABEL_PATTERN, "")
+    .replace(/実習先の|施設の|学校の|学校が指定する|学校指定の|指定する|各|該当の|対象の|日誌の|様式の|記入欄の|入力欄の|この|その|当該/g, "")
+    .replace(/と|や|及び|並びに|または|又は|[\s　\-ー−–—・/／、,]+/g, "")
+    .trim();
+  return remainder === "";
+}
+
+function isSafeAbstractFacilityLabelRule(value) {
+  const text = String(value || "").replace(/^\s*[:：]?\s*/, "").trim();
+  if (!text) return false;
+  if (isAbstractFacilityLabelList(text)) return true;
+  const abstractLabelRuleTail = text
+    .replace(FACILITY_LABEL_PATTERN, "")
+    .replace(/^[\s　\-ー−–—・/／、,とや及び並びにまたは又は]+/g, "")
+    .trim();
+  if (abstractLabelRuleTail.startsWith("は")) {
+    return isSafeFacilityLabelTail(abstractLabelRuleTail.replace(/^は\s*/, ""));
+  }
+  const withoutAbstractLabels = text.replace(FACILITY_LABEL_PATTERN, "");
+  if (FACILITY_NAME_LIKE_PATTERN.test(withoutAbstractLabels)) return false;
+  return isSafeFacilityLabelTail(text);
+}
+
+function isSafeFacilityLabelTail(value) {
+  const text = String(value || "")
+    .replace(/^\s*[:：=＝>＞→⇒\-ー−–—・/／、,，;；|｜（(【「『\[\［《〈〔<＜{｛]?\s*/, "")
+    .replace(/\s*[）)】」』\]\］》〉〕>＞}｝]\s*$/g, "")
+    .trim();
+  if (!text) return false;
+  return SAFE_FACILITY_LABEL_TAIL_PATTERN.test(text);
+}
+
+function isAbstractFacilityLabelList(value) {
+  const remainder = String(value || "")
+    .replace(FACILITY_LABEL_PATTERN, "")
+    .replace(/[\s　\-ー−–—・/／、,とや及び並びにまたは又は]+/g, "")
+    .trim();
+  return remainder === "";
+}
+
 function buildClientPrivacyFlags(value = {}) {
-  const text = normalizePrivacyScanText(JSON.stringify(value || {}));
+  const text = collectPrivacyScanTextValues(value);
   const riskText = removeAllowedAnonymizedTerms(text);
   const compactRiskText = riskText.replace(/[\s　]+/g, "");
   return {
     hasChildNameLikeText: /(くん|ちゃん|君|子ども名|こども名|園児名|児童名|氏名|名前|実名|本名|愛称)/.test(riskText),
-    hasSchoolNameLikeText: /(保育園|幼稚園|こども園|認定こども園|ナーサリー|キッズ園|園名|実習先名|施設名)/.test(riskText),
+    hasSchoolNameLikeText: SCHOOL_NAME_FLAG_PATTERN.test(riskText),
     hasMedicalOrFamilyInfo: MEDICAL_INFO_DETECTION_PATTERN.test(riskText) || FAMILY_INFO_DETECTION_PATTERN.test(riskText),
     hasContactInfo: /@|https?:\/\//i.test(riskText) || PHONE_DETECTION_PATTERN.test(riskText) || CONTACT_LABEL_DETECTION_PATTERN.test(riskText),
     hasIdentifierLikeText: /(学籍番号|学生番号|出席番号|住所|所在地|職員名|先生名|担任名)/.test(riskText) || JAPANESE_ADDRESS_DETECTION_PATTERN.test(riskText) || GUARDIAN_NAME_DETECTION_PATTERN.test(riskText),
@@ -841,15 +933,61 @@ function buildClientPrivacyCheck(value = {}) {
   return { flags, blockers, warnings, notes };
 }
 
-function buildClientPrivacyWarnings(value = {}) {
-  const check = buildClientPrivacyCheck(value);
-  return [...check.blockers, ...check.warnings];
-}
-
 function safeCopyText(value, maxLength = 280) {
   const text = normalizePrivacyScanText(value).replace(/\r\n/g, "\n").trim();
   if (!text) return "";
   return redactSensitiveText(text).slice(0, maxLength);
+}
+
+function normalizeTeacherVisibleText(value, maxLength = 280) {
+  return safeCopyText(value, maxLength)
+    .replaceAll(TEACHER_DISPLAY_EVALUATION_WORD, "断定表現")
+    .replaceAll(TEACHER_DISPLAY_EVALUATION_DIAGNOSIS, "決めつけや診断")
+    .replaceAll("評価点", "確認観点")
+    .replaceAll("自動評価", "確認観点")
+    .replaceAll("自動判断", "確認観点")
+    .replaceAll("学生比較", "個別支援の確認")
+    .replaceAll("ランキング", "一覧")
+    .replaceAll("採点", "学習支援の確認")
+    .replaceAll("成績", "学習支援")
+    .replaceAll("合否", "支援観点")
+    .replaceAll("可否", "支援観点")
+    .replaceAll("優劣", "個別支援の確認")
+    .replaceAll("個別差", "個別支援の確認")
+    .replaceAll("評価", "決めつけ");
+}
+
+function isTeacherAnonymousStudentLabel(value) {
+  return /^学生[A-ZＡ-Ｚ0-9０-９]+$/.test(safeCopyText(value, 80));
+}
+
+function buildTeacherAnonymousStudentLabel(seed = "", fallbackIndex = 0) {
+  const text = safeCopyText(seed, 120);
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  if (!text) return `学生${alphabet[Math.max(0, fallbackIndex) % alphabet.length]}`;
+  const hash = Array.from(text).reduce((total, char) => total + char.charCodeAt(0), 0);
+  const index = Math.abs(hash) % alphabet.length;
+  return `学生${alphabet[index]}`;
+}
+
+function normalizeTeacherStudentDisplayName(rawName, seed = "", fallbackIndex = 0) {
+  const name = safeCopyText(rawName, 80);
+  if (isTeacherAnonymousStudentLabel(name)) return name;
+  return buildTeacherAnonymousStudentLabel(seed || rawName, fallbackIndex);
+}
+
+function normalizeTeacherReviewQueueItem(item = {}) {
+  return {
+    ...item,
+    title: normalizeTeacherVisibleText(item.title || item.tag || "確認候補", 100),
+    tag: normalizeTeacherVisibleText(item.tag || "", 80),
+    detail: normalizeTeacherVisibleText(item.detail || "", 240),
+    handlingDetail: normalizeTeacherVisibleText(item.handlingDetail || "", 220),
+    studentName: normalizeTeacherStudentDisplayName(
+      item.studentName,
+      item.studentId || item.userId || item.generationId || item.id,
+    ),
+  };
 }
 
 function normalizeDisplayList(value, fallback = [], count = null, maxLength = 420) {
@@ -878,8 +1016,10 @@ function normalizeResultChecks(result = {}) {
 
 function canUseFinalDraftAfterCheck(review, checkedText, sanitizedText) {
   if (!review || review.blocked) return false;
+  if (review.status !== "clear") return false;
   if (safeRecordList(review.findings).length > 0) return false;
-  return !review.changed || checkedText === sanitizedText;
+  if (review.changed) return false;
+  return checkedText === sanitizedText;
 }
 
 function summarizeForDraft(value, maxLength = 260, preferredHeading = "") {
@@ -913,31 +1053,48 @@ function buildDiarySourceText(payload = {}) {
 
 function buildDiaryScaffoldDraft(payload = {}, result = {}, feedbackNextSteps = {}) {
   const source = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const episodes = Array.isArray(source.episodes) ? normalizeDiaryEpisodes(source.episodes) : [];
   const goal = summarizeForDraft(source.goal, 220);
-  const memo = summarizeForDraft(source.memo, 520, "エピソード");
-  const reflection = summarizeForDraft(source.reflection, 420);
-  const tomorrowTask = summarizeForDraft(source.tomorrowTask, 360);
+  const goalReflection = summarizeForDraft(source.goalReflection, 360);
+  const episodeMemo = episodes
+    .map((episode, index) => {
+      const memo = summarizeForDraft(episode.memo, 360);
+      const insight = summarizeForDraft(episode.insight, 260);
+      if (!memo && !insight) return "";
+      return [
+        `エピソード${index + 1}`,
+        memo,
+        insight ? `気づき: ${insight}` : "",
+      ].filter(Boolean).join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n") || summarizeForDraft(source.memo, 520, "エピソード");
+  const reflection = summarizeForDraft(source.overallLearning, 420) || summarizeForDraft(source.reflection, 420);
+  const tomorrowTask = summarizeForDraft(source.nextAction, 360) || summarizeForDraft(source.tomorrowTask, 360);
   const resultChecks = normalizeResultChecks(result).slice(0, 3);
   const feedbackFocus = feedbackNextSteps?.hasContent ? feedbackNextSteps.focus : "";
+  const fieldLabels = buildStudentDiaryFieldLabels({ studentDiaryFieldLabels: source.studentDiaryFieldLabels });
 
   return [
-    "【その日の実習目標に対する振り返り】",
-    goal
+    `【${fieldLabels.goalReflection}】`,
+    goalReflection
+      ? goalReflection
+      : goal
       ? `今日の実習目標「${goal}」について、実際に見た子どもの姿と自分の関わりを照らして振り返る。`
       : "今日の実習目標に対して、どの場面を見て何を学んだのかを一文で入れる。",
     "",
-    "【エピソード】",
-    memo || "見た場面、子どもの言葉や行動、自分の関わりをここに入れる。",
+    `【${fieldLabels.episodeMemo}】`,
+    episodeMemo || "見た場面、子どもの言葉や行動、自分の関わりをここに入れる。",
     reflection
-      ? `この場面から、${reflection} と考えた。そう考えた根拠になる姿を、もう一つ具体的に追記する。`
+      ? `${reflection}\nその根拠になる姿を、もう一つ具体的に追記する。`
       : "この場面から何を感じたか、なぜそう考えたかを自分の言葉で追記する。",
     "",
-    "【保育者として大切にしなければならないことの気づき】",
+    `【${fieldLabels.overallLearning}】`,
     reflection
-      ? `${reflection} という気づきを、保育者の関わりや環境構成とつなげて自分の言葉で整理する。`
+      ? `${reflection}\n保育者の関わりや環境構成とのつながりを、自分の言葉で整理する。`
       : "複数のエピソードを通して、保育者として大切だと感じたことをまとめる。",
     "",
-    "【次の日取り組みたいこと】",
+    `【${fieldLabels.nextAction}】`,
     tomorrowTask || "明日、何を見たいか、どの関わりを試したいか、担当教員に相談したいことを一つに絞る。",
     feedbackFocus ? `実習先で受けた助言は「${feedbackFocus}」として、翌日の観察に戻す。` : "",
     "",
@@ -956,8 +1113,10 @@ function redactSensitiveText(text) {
     .replace(/(氏名|名前|実名|本名|園児名|児童名|保護者名)[:：]\s*[^\s、。]{1,30}/g, "〈氏名〉")
     .replace(GUARDIAN_NAME_REDACTION_PATTERN, "〈保護者名〉")
     .replace(/(学籍番号|学生番号|出席番号)[:：]?\s*[A-Za-z0-9\-ー−]{2,40}/g, "〈識別番号〉")
-    .replace(/([一-龯ぁ-んァ-ンA-Za-z0-9０-９]{2,30})(保育園|幼稚園|こども園|認定こども園|ナーサリー|キッズ園)/g, "〈園名〉")
-    .replace(/(園名|実習先名|施設名)[:：]?\s*[^\s、。]{1,40}/g, "〈園名〉")
+    .replace(FACILITY_NAME_REDACTION_PATTERN, redactFacilityName)
+    .replace(FACILITY_LABEL_BRACKET_VALUE_REDACTION_PATTERN, redactFacilityLabelValue)
+    .replace(FACILITY_LABEL_VALUE_REDACTION_PATTERN, redactFacilityLabelValue)
+    .replace(FACILITY_LABEL_HA_VALUE_REDACTION_PATTERN, redactFacilityLabelValue)
     .replace(MEDICAL_INFO_REDACTION_PATTERN, "〈診断名等〉")
     .replace(FAMILY_INFO_REDACTION_PATTERN, "〈配慮情報〉")
     .replace(/(担任教員名|担任名|職員名|保育者名|先生名)[:：]?\s*[^\s、。]{0,30}/g, "担任職員");
@@ -1093,6 +1252,39 @@ function buildFeedbackNextSteps(feedback = {}) {
   };
 }
 
+function buildFeedbackActionItems(feedback = {}) {
+  return [
+    {
+      target: "feedbackReceived",
+      label: "助言",
+      title: "受けた助言",
+      body: "要点だけを自分の言葉で残す。",
+      done: hasStudentAuthoredText(feedback.received),
+    },
+    {
+      target: "feedbackInterpretation",
+      label: "理解",
+      title: "自分の理解",
+      body: "助言をどう受け止めたかを書く。",
+      done: hasStudentAuthoredText(feedback.interpretation),
+    },
+    {
+      target: "feedbackTomorrowAction",
+      label: "明日",
+      title: "明日の行動",
+      body: "見ること・試すことを一つに絞る。",
+      done: hasStudentAuthoredText(feedback.tomorrowAction),
+    },
+    {
+      target: "feedbackTeacherQuestion",
+      label: "相談",
+      title: "教員への相談",
+      body: "判断に迷う点だけを残す。",
+      done: hasStudentAuthoredText(feedback.teacherQuestion),
+    },
+  ];
+}
+
 function buildClientDemoGeneration(payload = {}) {
   const scene = safeCopyText(payload.scene || "実習場面", 80);
   const memo = safeCopyText(payload.memo || "", 180);
@@ -1108,23 +1300,131 @@ function buildClientDemoGeneration(payload = {}) {
     ],
     sections: [
       memo
-        ? `${scene}で見たことを、できた/できないの評価ではなく、行動ややりとりとして整理できています。`
+        ? `${scene}で見たことを、できた/できないで決めず、行動ややりとりとして整理できています。`
         : "まず見たことを一つ選び、行動、言葉、周囲の状況に分けて書いてみましょう。",
       reflection
-        ? `「${reflection}」について、そう考えた根拠になる子どもの姿をもう一つ探してみましょう。`
+        ? "この考えの根拠になる子どもの姿をもう一つ探してみましょう。"
         : "自分がなぜそう考えたのか、見た事実と考えたことを分けて確認しましょう。",
-      "実名、園名、家庭事情、気持ちの断定が入る場合は、A児、実習先、見られた行動のような表現へ戻します。",
+      "個人や実習先を特定できる情報、要配慮情報、気持ちの断定が入る場合は、A児、実習先、見られた行動のような表現へ戻します。",
       tomorrowTask
-        ? `明日は「${tomorrowTask}」を、保育者の関わりや環境の変化と合わせて見てみましょう。`
+        ? "次に見る場面では、保育者の関わりや環境の変化も合わせて見てみましょう。"
         : "明日は、同じ場面で子どもの表情、手の動き、周囲との関わりを一つ選んで観察しましょう。",
       "迷った表現や実習先で受けた助言の解釈は、提出前に学校の担当教員へ確認する相談点として残しましょう。",
     ],
     checks: [
       "入力にない事実を足していませんか。",
       "子どもの気持ちや性格を決めつけず、見た行動として書けていますか。",
-      "実名、園名、家庭事情など特定につながる情報を避けていますか。",
+      "個人や実習先を特定できる情報、要配慮情報を避けていますか。",
       "実習先で受けた助言を、明日の観察に戻せていますか。",
     ],
+  };
+}
+
+function buildClientDemoStudentChatGeneration(payload = {}) {
+  const stage = payload.stage || "legacy";
+  const target = payload.target || "";
+  const formatLabel = safeCopyText(payload.formatLabel || "", 80);
+  return {
+    kind: "student_chat",
+    stage,
+    target,
+    acknowledgement: "一言を欄に保存しました。",
+    nextQuestion: getClientDemoStudentChatQuestion(target, stage),
+    fieldHint: formatLabel
+      ? `${formatLabel}へつながる一言です。次の画面で自分の言葉に直します。`
+      : "学校フォーマットの該当欄へ入ります。",
+    safetyNote: "実名や園名が入っていないかだけ確認します。",
+    organization: stage === "organize"
+      ? buildClientDemoStudentChatOrganization(payload)
+      : createEmptyStudentChatOrganization(),
+  };
+}
+
+function getClientDemoStudentChatQuestion(target, stage = "legacy") {
+  if (stage === "episode") return "その時、自分はどのように関わり、その後どのような姿が見られましたか。";
+  if (stage === "organize") return "整理案と元メモを見比べ、事実と違う部分がないか確認してください。";
+  if (target === "episodeMemo") return "その場面を見て、保育者として何が大切だと感じましたか。";
+  if (target === "episodeInsight") return "明日、同じような場面で何を一つ見ますか。";
+  if (target === "goalReflection") return "目標とつながった場面を、一つだけ具体的にするとどうなりますか。";
+  if (target === "overallLearning") return "その気づきを、明日の行動に一つつなげるなら何を見ますか。";
+  if (target === "nextAction") return "学校フォーマットで、今の一言を自分の言葉に直してみましょう。";
+  if (String(target).startsWith("feedback")) return "受けた助言を、明日見る子どもの姿に戻すと何を見ますか。";
+  return "次に、実際に見たことを一つだけ足すなら何ですか。";
+}
+
+function createEmptyStudentChatOrganization() {
+  return {
+    factSummary: "",
+    goalConnection: "",
+    professionalReview: {
+      focusText: "",
+      reason: "",
+      revisionPrompt: "",
+    },
+    reflectionStarter: "",
+    fieldStarters: {
+      goalReflection: "",
+      episodeInsight: "",
+      overallLearning: "",
+      nextAction: "",
+    },
+    missingInformation: "",
+  };
+}
+
+function buildClientDemoStudentChatOrganization(payload = {}) {
+  const practiceGoal = safeCopyText(payload.practiceGoal || "", 120);
+  const episodeMemo = safeCopyText(
+    [payload.episodeMemo, payload.answer].filter(Boolean).join(" "),
+    260,
+  );
+  const reflectionStarter = "この場面で見た【観察した事実】から、私は【自分の気づき】と考えた。";
+  return {
+    factSummary: episodeMemo,
+    goalConnection: practiceGoal
+      ? `実習目標「${practiceGoal}」と、この出来事のどの部分がつながるかを、見た事実から確認します。`
+      : "実習目標が未入力のため、出来事とのつながりはまだ決めません。",
+    professionalReview: buildClientDemoProfessionalReview(episodeMemo),
+    reflectionStarter,
+    fieldStarters: {
+      goalReflection: practiceGoal
+        ? `実習目標「${practiceGoal.slice(0, 60)}」と【目標につながった場面】を見比べ、【自分が考えたこと】を足す。`
+        : "実習目標と【目標につながった場面】を見比べ、【自分が考えたこと】を足す。",
+      episodeInsight: reflectionStarter,
+      overallLearning: "今日の場面を通して、【共通して気づいたこと】を【保育者として大切にしたいこと】へつなげる。",
+      nextAction: "明日は【見る場面】で、【確認したい姿や関わり】を一つ見る。",
+    },
+    missingInformation: "記録した内容と違う部分や、まだ書けていない子どもの姿はありますか。",
+  };
+}
+
+function buildClientDemoProfessionalReview(episodeMemo) {
+  const focusText = episodeMemo.slice(0, 60);
+  if (/友だち|一緒|やりとり|順番|貸|渡/.test(episodeMemo)) {
+    return {
+      focusText,
+      reason: "子ども同士の関わりは、関係性を評価せず、実際のやり取りと援助を分けて捉える必要があります。5領域の「人間関係」も、この姿を振り返る補助的な観点になります。",
+      revisionPrompt: "やり取りの前後に見た子どもの姿と、自分がした関わりを分けて追記できますか。",
+    };
+  }
+  if (/話|言葉|声|伝え|聞/.test(episodeMemo)) {
+    return {
+      focusText,
+      reason: "発話そのものと、そこから考えたことを分けると、伝え合う姿を具体的な事実から捉えられます。",
+      revisionPrompt: "実際に聞いた言葉と、その前後に見た姿を分けて追記できますか。",
+    };
+  }
+  if (/玩具|道具|素材|場所|環境|ブロック/.test(episodeMemo)) {
+    return {
+      focusText,
+      reason: "環境を通して行う保育では、物・空間・時間と子どもの活動の関係を、見た事実から捉えることが重要です。",
+      revisionPrompt: "道具の配置や使い方と、その後に見られた子どもの姿を追記できますか。",
+    };
+  }
+  return {
+    focusText,
+    reason: "観察した事実と自分の解釈を区別すると、省察の根拠が明確になります。",
+    revisionPrompt: "どこまでが見た事実で、どこからが自分の考えかを確認できますか。",
   };
 }
 
@@ -1193,7 +1493,7 @@ function buildClientPrivacyReview(kind, payload = {}, phase = "pre_ai") {
   return {
     kind,
     phase,
-    status: blocked ? "blocked" : changed || findings.length > 0 || contextNotes.length > 0 ? "review" : "clear",
+    status: blocked ? "blocked" : changed || findings.length > 0 ? "review" : "clear",
     changed,
     blocked,
     payload: sanitizedPayload,
@@ -1235,16 +1535,12 @@ function readStoredSession() {
 
 export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/demo" } = {}) {
   const todayKey = useMemo(() => getLocalDateKey(), []);
-  const usageKey = `manabi-diary-usage-${todayKey}`;
-  const feedbackKey = "manabi-diary-feedback";
   const generationLogKey = "manabi-generation-logs";
-  const passKey = "manabi-practice-pass-demo";
+  const studentProcessEventKey = STUDENT_PROCESS_EVENT_STORAGE_KEY;
 
   const [activeView, setActiveView] = useState("diary");
   const [tone, setTone] = useState("balanced");
   const [diary, setDiary] = useState(() => createInitialDiary(todayKey));
-  const [usage, setUsage] = useState({ used: 0, bonus: 0 });
-  const [hasPracticePass, setHasPracticePass] = useState(false);
   const [status, setStatus] = useState("");
   const [result, setResult] = useState(null);
   const [resultMeta, setResultMeta] = useState(null);
@@ -1255,10 +1551,10 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   const [checkedPayload, setCheckedPayload] = useState(null);
   const [finalDraft, setFinalDraft] = useState("");
   const [finalCheck, setFinalCheck] = useState(null);
-  const [feedbackCount, setFeedbackCount] = useState(0);
-  const [generationCount, setGenerationCount] = useState(0);
   const [session, setSession] = useState(null);
   const [sessionChecked, setSessionChecked] = useState(false);
+  const [sessionRestoreError, setSessionRestoreError] = useState("");
+  const [sessionRestoreAttempt, setSessionRestoreAttempt] = useState(0);
   const [schoolSummary, setSchoolSummary] = useState(null);
   const [schoolSummaryStatus, setSchoolSummaryStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1266,49 +1562,62 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   const [copied, setCopied] = useState(false);
   const trackedAppOpenRef = useRef(false);
   const lastTrackedViewRef = useRef("");
+  const studentProcessDemoIdRef = useRef("");
 
   const role = session?.role || "student";
   const isStudent = role === "student";
   const isDemoSession = session?.source === "demo";
   const isPublicDemoSession = publicDemoRole === "student" || publicDemoRole === "teacher";
-  const staffNavItems = useMemo(
-    () => isPublicDemoSession
-      ? STAFF_NAV_ITEMS.filter(([view]) => !PUBLIC_DEMO_HIDDEN_STAFF_VIEWS.has(view))
-      : STAFF_NAV_ITEMS,
-    [isPublicDemoSession],
-  );
-  const staffViewIds = useMemo(() => staffNavItems.map(([view]) => view), [staffNavItems]);
-  const visibleNavItems = isStudent ? STUDENT_NAV_ITEMS : staffNavItems;
+  const visibleNavItems = isStudent ? STUDENT_NAV_ITEMS : STAFF_NAV_ITEMS;
   const currentView = isStudent
     ? "diary"
-    : (staffViewIds.includes(activeView) ? activeView : "school");
+    : (STAFF_VIEW_IDS.includes(activeView) ? activeView : "school");
   const shouldTrackAccess = sessionChecked && session?.source === "supabase";
 
-  const dailyLimit = hasPracticePass ? LIMITS.practiceDailyUses : LIMITS.freeDailyUses;
-  const remaining = isDemoSession && !isPublicDemoSession ? Math.max(0, dailyLimit + usage.bonus - usage.used) : Infinity;
-  const total = dailyLimit + usage.bonus;
-  const usageWidth = isDemoSession && !isPublicDemoSession && total !== 0 ? (remaining / total) * 100 : 100;
-  const publicDemoStaffMetrics = isPublicDemoSession && !isStudent
-    ? {
-        students: demoStudentUsage.length,
-        generations: generationCount || demoRecentLogs.length,
-        feedback: feedbackCount || demoPocMetrics.length,
-        reviewCandidates: demoReviewQueue.length,
-        activeStudents: demoStudentUsage.filter((student) => student.generations > 0).length,
-      }
-    : null;
-  const staffMetrics = publicDemoStaffMetrics || schoolSummary?.metrics || {};
+  const activeSchoolFormat = useMemo(
+    () => normalizeClientTemplate(session?.schoolFormat || defaultSchoolFormat),
+    [session?.schoolFormat],
+  );
+  const activeDiaryRequirements = useMemo(
+    () => buildStudentDiaryRequirements(activeSchoolFormat),
+    [activeSchoolFormat],
+  );
+
+  useEffect(() => {
+    if (!isStudent) return;
+    setDiary((current) => {
+      const { initialCount, minCount } = activeDiaryRequirements.episodes;
+      const episodes = normalizeDiaryEpisodes(current.episodes, current.memo, current.reflection, initialCount);
+      const hasContent = episodes.some((episode) => normalizeMultiline(episode.memo) || normalizeMultiline(episode.insight));
+      const targetCount = hasContent ? Math.max(episodes.length, minCount) : initialCount;
+      if (episodes.length === targetCount) return current;
+      const nextEpisodes = episodes.length > targetCount
+        ? episodes.slice(0, targetCount)
+        : [...episodes, ...Array.from({ length: targetCount - episodes.length }, (_, index) => createDiaryEpisode(episodes.length + index + 1))];
+      return { ...current, episodes: nextEpisodes };
+    });
+  }, [activeDiaryRequirements, isStudent]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadInitialState() {
-      let nextSession = isPublicDemoSession ? buildPublicDemoSession(publicDemoRole) : readStoredSession();
+      let nextSession = null;
+      let nextSessionRestoreError = "";
+      if (isPublicDemoSession) {
+        clearAppLocalStorage();
+        nextSession = buildPublicDemoSession(publicDemoRole);
+      } else {
+        nextSession = readStoredSession();
+      }
       if (!isPublicDemoSession) {
         try {
           const response = await fetch("/api/auth", { cache: "no-store" });
-          if (response.ok) {
-            const auth = await response.json();
+          const auth = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            nextSession = null;
+            nextSessionRestoreError = "ログイン状態と学校フォーマットを確認できませんでした。入力し直さず、少し時間を置いて再試行してください。";
+          } else {
             if (auth.session) {
               nextSession = auth.session;
               clearAppLocalStorage();
@@ -1317,40 +1626,22 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
               clearAppLocalStorage();
             }
           }
-        } catch (error) {
-          console.warn("Auth session restore skipped:", error.message);
+        } catch {
+          nextSession = null;
+          nextSessionRestoreError = "ログイン状態と学校フォーマットを確認できませんでした。入力し直さず、少し時間を置いて再試行してください。";
+          console.warn("Auth session restore temporarily unavailable.");
         }
       }
 
       if (!cancelled) {
         setSession(nextSession);
+        setSessionRestoreError(nextSessionRestoreError);
         if (nextSession?.source === "demo") {
           if (isPublicDemoSession) {
             setStatus("公開デモ用の架空セッションです。実名や実習先名は入れず、架空の場面で試してください。");
-            setUsage({ used: 0, bonus: 0 });
-            setHasPracticePass(false);
-            setFeedbackCount(0);
-            setGenerationCount(0);
             setSessionChecked(true);
             return;
           }
-          try {
-            const savedUsage = JSON.parse(localStorage.getItem(usageKey));
-            setUsage({ used: 0, bonus: 0, ...savedUsage });
-            setHasPracticePass(localStorage.getItem(passKey) === "active");
-            setFeedbackCount(getSavedFeedbackRecords(feedbackKey).length);
-            setGenerationCount(getSavedFeedbackRecords(generationLogKey).length);
-          } catch {
-            setUsage({ used: 0, bonus: 0 });
-            setHasPracticePass(false);
-            setFeedbackCount(0);
-            setGenerationCount(0);
-          }
-        } else {
-          setUsage({ used: 0, bonus: 0 });
-          setHasPracticePass(false);
-          setFeedbackCount(0);
-          setGenerationCount(0);
         }
         setSessionChecked(true);
       }
@@ -1360,7 +1651,7 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     return () => {
       cancelled = true;
     };
-  }, [feedbackKey, generationLogKey, isPublicDemoSession, passKey, publicDemoRole, usageKey]);
+  }, [isPublicDemoSession, publicDemoRole, sessionRestoreAttempt]);
 
   useEffect(() => {
     if (!sessionChecked || !isStudent) return;
@@ -1371,10 +1662,10 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
 
   useEffect(() => {
     if (!sessionChecked || isStudent) return;
-    if (!staffViewIds.includes(activeView)) {
+    if (!STAFF_VIEW_IDS.includes(activeView)) {
       setActiveView("school");
     }
-  }, [activeView, isStudent, sessionChecked, staffViewIds]);
+  }, [activeView, isStudent, sessionChecked]);
 
   useEffect(() => {
     if (!shouldTrackAccess || trackedAppOpenRef.current) return;
@@ -1398,7 +1689,7 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   }, [currentView, isStudent, role, shouldTrackAccess, studentFlowStep]);
 
   useEffect(() => {
-    if (!sessionChecked || isStudent || !["school", "assignments", "students", "review", "formats"].includes(currentView)) return;
+    if (!sessionChecked || isStudent || currentView !== "school") return;
     let cancelled = false;
 
     async function loadSchoolSummary() {
@@ -1446,13 +1737,44 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
       classId: session?.classId || "",
       schoolPlan: session?.schoolPlan || "",
       contractStatus: session?.contractStatus || "",
-      userId: session?.userId || "",
+      userId: session?.source === "demo" ? "" : session?.userId || "",
+      demoStudentId: session?.demoStudentId || "",
       role: session?.role || "",
       roleLabel: session?.roleLabel || "",
       userName: session?.name || "",
       email: session?.email || "",
       source: session?.source || "",
     };
+  }
+
+  function getStudentProcessSessionContext() {
+    return {
+      source: session?.source === "demo" ? "demo" : "",
+      role: session?.role === "teacher" ? "teacher" : "student",
+      demoStudentId: ensureStudentProcessDemoStudentId(),
+    };
+  }
+
+  function ensureStudentProcessDemoStudentId() {
+    if (!isStudent || !isDemoSession || isPublicDemoSession) return "";
+    const sessionDemoStudentId = normalizeDemoStudentId(session?.demoStudentId, "");
+    if (sessionDemoStudentId) {
+      studentProcessDemoIdRef.current = sessionDemoStudentId;
+      return sessionDemoStudentId;
+    }
+    const existingDemoStudentId = normalizeDemoStudentId(studentProcessDemoIdRef.current, "");
+    if (existingDemoStudentId) return existingDemoStudentId;
+    const nextDemoStudentId = createDemoStudentId();
+    studentProcessDemoIdRef.current = nextDemoStudentId;
+    const nextSession = {
+      ...session,
+      source: "demo",
+      role: "student",
+      demoStudentId: nextDemoStudentId,
+    };
+    safeSetLocalStorage("manabi-demo-session", JSON.stringify(nextSession));
+    setSession(nextSession);
+    return nextDemoStudentId;
   }
 
   async function trackAccessEvent(event, metadata = {}) {
@@ -1480,21 +1802,63 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   }
 
   function saveGenerationLog(record) {
-    if (isPublicDemoSession) {
-      setGenerationCount((current) => current + 1);
-      return;
-    }
+    if (isPublicDemoSession) return;
     if (isDemoSession) {
       const saved = getSavedFeedbackRecords(generationLogKey);
       const nextRecords = [sanitizeGenerationLogForExport(record), ...saved].slice(0, 100);
-      if (safeSetLocalStorage(generationLogKey, JSON.stringify(nextRecords))) {
-        setGenerationCount(nextRecords.length);
-      }
-    } else {
-      setGenerationCount((current) => current + 1);
+      safeSetLocalStorage(generationLogKey, JSON.stringify(nextRecords));
     }
     if (!record.serverPersisted && !isDemoSession) {
       persistServerLog("generation", record);
+    }
+  }
+
+  function saveStudentProcessEvent(stage, context = {}) {
+    if (!isStudent || isPublicDemoSession) return;
+    const eventDiary = context.diary || diary;
+    const eventFeedback = context.feedback || feedback;
+    const event = buildStudentProcessEvent({
+      stage,
+      diary: eventDiary,
+      feedback: eventFeedback,
+      review: context.review,
+      result: context.result,
+      finalCheck: context.finalCheck,
+      finalDraft: context.finalDraft,
+      writingCoach: buildStudentWritingCoach(eventDiary, eventFeedback, activeSchoolFormat),
+      session: getStudentProcessSessionContext(),
+      createdAt: new Date().toISOString(),
+    });
+    if (isDemoSession) {
+      const saved = getSavedFeedbackRecords(studentProcessEventKey);
+      const nextRecords = mergeStudentProcessEvents(saved, event);
+      const storagePayload = serializeStudentProcessEventsForStorage(nextRecords);
+      if (!safeSetLocalStorage(studentProcessEventKey, storagePayload.json)) {
+        setStatus("学習プロセスを端末に保存できませんでした。入力内容は残っています。");
+      } else if (storagePayload.truncated) {
+        setStatus("端末の保存容量に合わせて、古い学習プロセスを整理しました。");
+      }
+      return;
+    }
+    if (ENABLE_STUDENT_PROCESS_PERSISTENCE) void persistStudentProcessEvent(event);
+  }
+
+  async function persistStudentProcessEvent(event) {
+    try {
+      const response = await fetch("/api/student-process/events", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (isExpectedStudentProcessPersistenceSkipCode(body.code)) return;
+        throw new Error(body.error || "student process persistence failed");
+      }
+      setStatus((current) => current.startsWith("学習プロセスを保存できませんでした。") ? "" : current);
+    } catch (error) {
+      console.warn("Student process persistence skipped:", error.message);
+      setStatus("学習プロセスを保存できませんでした。入力は残っているため、そのまま作業を続けられます。");
     }
   }
 
@@ -1515,13 +1879,6 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     }
   }
 
-  function saveUsage(nextUsage) {
-    setUsage(nextUsage);
-    if (isDemoSession && !isPublicDemoSession) {
-      safeSetLocalStorage(usageKey, JSON.stringify(nextUsage));
-    }
-  }
-
   function resetFeedback() {
     setFeedback(initialFeedback);
   }
@@ -1535,27 +1892,45 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     setResult(null);
     setResultMeta(null);
     if (!keepInput) {
-      setDiary(createInitialDiary(todayKey));
+      setDiary(createInitialDiary(todayKey, activeSchoolFormat));
       resetFeedback();
       setSelectedSampleId("");
     }
   }
 
-  function updateDiary(field, value) {
-    setDiary((current) => ({ ...current, [field]: value }));
+  function updateDiary(field, value, scaffold = "") {
+    setDiary((current) => {
+      const nextDiary = { ...current, [field]: value };
+      return scaffold || !normalizeMultiline(value)
+        ? setStudentFieldScaffold(nextDiary, { target: field, scaffold })
+        : nextDiary;
+    });
     setPrivacyReview(null);
     setCheckedPayload(null);
     setFinalCheck(null);
     if (studentFlowStep !== "input") setStudentFlowStep("input");
   }
 
-  function updateDiaryEpisode(index, field, value) {
+  function updateDiaryEpisode(index, field, value, scaffold = "") {
     setDiary((current) => {
       const episodes = normalizeDiaryEpisodes(current.episodes, current.memo, current.reflection).map((episode, episodeIndex) => (
         episodeIndex === index ? { ...episode, [field]: value } : episode
       ));
-      return { ...current, episodes };
+      const nextDiary = { ...current, episodes };
+      const target = field === "memo" ? "episodeMemo" : field === "insight" ? "episodeInsight" : "";
+      const episodeId = String(episodes[index]?.id || "");
+      return target && (scaffold || !normalizeMultiline(value))
+        ? setStudentFieldScaffold(nextDiary, { target, episodeId, scaffold })
+        : nextDiary;
     });
+    setPrivacyReview(null);
+    setCheckedPayload(null);
+    setFinalCheck(null);
+    if (studentFlowStep !== "input") setStudentFlowStep("input");
+  }
+
+  function applyStudentChatStarterPatch(patch) {
+    setDiary((current) => mergeStudentChatDiaryStarterPatch(current, patch));
     setPrivacyReview(null);
     setCheckedPayload(null);
     setFinalCheck(null);
@@ -1565,6 +1940,7 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   function addDiaryEpisode() {
     setDiary((current) => {
       const episodes = normalizeDiaryEpisodes(current.episodes, current.memo, current.reflection);
+      if (episodes.length >= activeDiaryRequirements.episodes.maxCount) return current;
       const nextIndex = episodes.length + 1;
       return {
         ...current,
@@ -1581,9 +1957,14 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   }
 
   function removeDiaryEpisode(index) {
+    const currentEpisodes = normalizeDiaryEpisodes(diary.episodes, diary.memo, diary.reflection);
+    if (currentEpisodes.length <= activeDiaryRequirements.episodes.minCount) return;
+    const targetEpisode = currentEpisodes[index];
+    if (!targetEpisode) return;
+    if (hasStudentDiaryEpisodeContent(targetEpisode) && !window.confirm("入力済みのエピソードを削除しますか？")) return;
     setDiary((current) => {
       const episodes = normalizeDiaryEpisodes(current.episodes, current.memo, current.reflection);
-      if (episodes.length <= 1) return current;
+      if (episodes.length <= activeDiaryRequirements.episodes.minCount) return current;
       return {
         ...current,
         episodes: episodes.filter((_, episodeIndex) => episodeIndex !== index),
@@ -1598,17 +1979,20 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   function loadDiarySample(sample) {
     setSelectedSampleId(sample.id);
     const sampleValues = sample.values || {};
-    setDiary((current) => ({
-      ...current,
-      ...sampleValues,
-      date: current.date || todayKey,
-      goalReflection: sampleValues.goalReflection || sampleValues.reflection || "",
-      episodes: normalizeDiaryEpisodes(sampleValues.episodes, sampleValues.memo, ""),
-      reflection: sampleValues.reflection || "",
-      overallLearning: sampleValues.overallLearning || sampleValues.reflection || "",
-      tomorrowTask: sampleValues.tomorrowTask || "",
-      nextAction: sampleValues.nextAction || sampleValues.tomorrowTask || "",
-    }));
+    setDiary((current) => {
+      const { studentScaffolds: _studentScaffolds, ...currentWithoutScaffolds } = current;
+      return {
+        ...currentWithoutScaffolds,
+        ...sampleValues,
+        date: current.date || todayKey,
+        goalReflection: sampleValues.goalReflection || sampleValues.reflection || "",
+        episodes: normalizeDiaryEpisodes(sampleValues.episodes, sampleValues.memo, ""),
+        reflection: sampleValues.reflection || "",
+        overallLearning: sampleValues.overallLearning || sampleValues.reflection || "",
+        tomorrowTask: sampleValues.tomorrowTask || "",
+        nextAction: sampleValues.nextAction || sampleValues.tomorrowTask || "",
+      };
+    });
     setFeedback({ ...initialFeedback, ...(sample.feedback || {}) });
     setTone(sample.tone);
     setResult(null);
@@ -1627,16 +2011,16 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
 
   async function generate(kind, payload, options = {}) {
     if (isPublicDemoSession) {
-      return buildClientDemoGeneration(payload);
+      return kind === "student_chat"
+        ? buildClientDemoStudentChatGeneration(payload)
+        : buildClientDemoGeneration(payload);
     }
-    const subscription = options.subscription || (hasPracticePass ? "practice" : "free");
     const response = await fetch("/api/generate", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         kind,
         payload,
-        subscription,
         provider: options.provider,
         fallback: options.fallback,
       }),
@@ -1656,21 +2040,21 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     return response.json();
   }
 
+  async function handleStudentChatAssist(payload) {
+    return generate("student_chat", payload);
+  }
+
   async function handleDiarySubmit(event) {
     event.preventDefault();
-    if (isDemoSession && !isPublicDemoSession && remaining <= 0) {
-      setStatus("学生画面の利用枠を使い切りました。必要に応じて利用枠を追加できます。");
-      return;
-    }
 
-    if (!hasDiaryInputText(diary)) {
-      setStatus("学校フォーマットのどこかに、今日あったことを言葉で入力してください。");
+    if (!hasMinimumStudentDiaryInput(diary, feedback, activeSchoolFormat)) {
+      setStatus("一場面、気づき、明日の一点を自分の言葉で入力してください。");
       return;
     }
 
     setBusy(true);
     try {
-      const review = await privacyCheckRequest("diary", buildDiaryGenerationPayload(diary, feedback, tone), "pre_ai");
+      const review = await privacyCheckRequest("diary", buildDiaryGenerationPayload(diary, feedback, tone, activeSchoolFormat), "pre_ai");
       setPrivacyReview(review);
       setCheckedPayload(review.payload);
       setResult(null);
@@ -1678,6 +2062,11 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
       setFinalCheck(null);
       setStudentFlowStep("confirm");
       setStatus(review.summary || "安全確認を表示しました。内容を確認してから問い返しへ進めます。");
+      saveStudentProcessEvent("safety_check_completed", {
+        diary,
+        feedback,
+        review,
+      });
       trackAccessEvent("student_safety_checked", {
         flowStep: "confirm",
         status: review.blocked ? "blocked" : review.status || "review",
@@ -1695,23 +2084,17 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
       setStatus("先に入力内容を見直してください。安全化だけでは扱えない表現が残っています。");
       return;
     }
-    if (isDemoSession && !isPublicDemoSession && remaining <= 0) {
-      setStatus("学生画面の利用枠を使い切りました。必要に応じて利用枠を追加できます。");
-      return;
-    }
-    const payload = checkedPayload || buildDiaryGenerationPayload(diary, feedback, tone);
+    const payload = checkedPayload || buildDiaryGenerationPayload(diary, feedback, tone, activeSchoolFormat);
     setBusy(true);
     try {
       const content = await generate("diary", payload);
       setResult(content);
-      const actualSubscription = hasPracticePass ? "practice" : "free";
       const generationId = content.generationId || crypto.randomUUID();
       const createdAt = new Date().toISOString();
       const input = payload;
       setResultMeta({
         kind: "diary",
         generationId,
-        subscription: actualSubscription,
         tone,
         input,
         session: getSessionContext(),
@@ -1720,18 +2103,22 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
       saveGenerationLog({
         id: generationId,
         kind: "diary",
-        subscription: actualSubscription,
         input,
         output: content,
         session: getSessionContext(),
         serverPersisted: Boolean(content.generationId),
         createdAt,
       });
-      saveUsage({ ...usage, used: usage.used + 1 });
       setStudentFlowStep("revise");
       setFinalDraft("");
       setFinalCheck(null);
       setStatus("問い返しと提出前の自己確認を表示しました。最後に自分の言葉で記録を整えてください。");
+      saveStudentProcessEvent("question_generated", {
+        diary,
+        feedback,
+        review: privacyReview,
+        result: content,
+      });
       trackAccessEvent("student_question_generated", {
         flowStep: "revise",
         status: "completed",
@@ -1765,6 +2152,15 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
       setStatus("提出前の記録を、言葉で入力してください。");
       return;
     }
+    const scaffoldDraft = result
+      ? buildDiaryScaffoldDraft(checkedPayload, result, buildFeedbackNextSteps(feedback))
+      : "";
+    const draftReadiness = getStudentDraftEditReadiness(draft, scaffoldDraft);
+    if (!draftReadiness.ready) {
+      setStudentFlowStep("final");
+      setStatus(`${draftReadiness.title}。${draftReadiness.body}`);
+      return;
+    }
     setBusy(true);
     try {
       const review = await privacyCheckRequest(
@@ -1782,6 +2178,13 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
       setFinalCheck(review);
       setStudentFlowStep("final");
       setStatus(review.summary || "提出前チェックを表示しました。");
+      saveStudentProcessEvent("final_check_completed", {
+        diary,
+        feedback,
+        finalCheck: review,
+        finalDraft: draft,
+        result,
+      });
       trackAccessEvent("student_final_checked", {
         flowStep: "final",
         status: review.blocked ? "blocked" : review.status || "review",
@@ -1797,33 +2200,7 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     const sanitizedDraft = finalCheck?.payload?.memo;
     if (!sanitizedDraft) return;
     setFinalDraft(sanitizedDraft);
-    setStatus("安全な表現に整えた記録を反映しました。");
-  }
-
-  function watchAd() {
-    if (!isDemoSession) {
-      setStatus("利用枠は学校契約と上限設定で管理されています。");
-      return;
-    }
-    if (usage.bonus >= LIMITS.adBonusLimit || hasPracticePass) return;
-    setStatus("利用枠を追加しています...");
-    window.setTimeout(() => {
-      saveUsage({ ...usage, bonus: usage.bonus + 1 });
-      setStatus("追加サポートが1回増えました。");
-    }, 900);
-  }
-
-  function activatePracticePass() {
-    if (!isDemoSession) {
-      setStatus("導入プランは学校契約として管理します。");
-      return;
-    }
-    if (!safeSetLocalStorage(passKey, "active")) {
-      setStatus("ブラウザの保存設定により、学校導入モードを保存できませんでした。");
-      return;
-    }
-    setHasPracticePass(true);
-    setStatus("学校導入モードを有効化しました。");
+    setStatus("安全な表現を反映しました。意味が変わっていないか確認し、もう一度提出前チェックを通してください。");
   }
 
   async function logout() {
@@ -1831,7 +2208,9 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     setLogoutBusy(true);
     setStatus(isPublicDemoSession ? "デモを終了しています。" : "ログアウトしています。");
     try {
-      clearAppLocalStorage();
+      const preserveStudentProcessEvents = !isPublicDemoSession && isDemoSession && isStudent;
+      clearAppLocalStorage({ preserveStudentProcessEvents });
+      if (preserveStudentProcessEvents) saveStudentProcessSwitch(session);
       let redirectHref = "/login";
       if (isPublicDemoSession) {
         setSession(null);
@@ -1881,6 +2260,15 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     if (!finalDraft.trim()) return;
     const checkedText = normalizeMultiline(finalDraft);
     const sanitizedText = normalizeMultiline(finalCheck?.payload?.memo || "");
+    const scaffoldDraft = result
+      ? buildDiaryScaffoldDraft(checkedPayload, result, buildFeedbackNextSteps(feedback))
+      : "";
+    const draftReadiness = getStudentDraftEditReadiness(checkedText, scaffoldDraft);
+    if (!draftReadiness.ready) {
+      setStudentFlowStep("final");
+      setStatus(`${draftReadiness.title}。${draftReadiness.body}`);
+      return;
+    }
     const canCopyCheckedFinal = canUseFinalDraftAfterCheck(finalCheck, checkedText, sanitizedText);
     if (!canCopyCheckedFinal) {
       setStudentFlowStep("final");
@@ -1890,6 +2278,8 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
         setStatus("記録に扱えない表現が残っています。入力を見直してから再チェックしてください。");
       } else if (finalCheck.status === "review") {
         setStatus("記録前に見直したい内容があります。入力を整えてから再チェックしてください。");
+      } else if (finalCheck.status === "clear" && checkedText !== sanitizedText) {
+        setStatus("記録を直した後は、もう一度提出前チェックを行ってからコピーしてください。");
       } else {
         setStatus("安全化した文を反映してからコピーしてください。");
       }
@@ -1899,6 +2289,13 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
     setStatus("記録をコピーしました。");
+    saveStudentProcessEvent("final_copied", {
+      diary,
+      feedback,
+      finalCheck,
+      finalDraft,
+      result,
+    });
     trackAccessEvent("student_final_copied", {
       flowStep: "final",
       status: "copied",
@@ -1930,7 +2327,8 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     }
 
     const localRecords = isDemoSession ? getSavedFeedbackRecords(generationLogKey) : [];
-    const serverRecords = (schoolSummary?.recentLogs || []).map((log) => ({
+    const serverLogDisplays = buildSafeTeacherLogDisplays(schoolSummary?.recentLogs || []);
+    const serverRecords = serverLogDisplays.map((log) => ({
       id: log.id,
       createdAt: log.createdAt,
       kind: log.kind,
@@ -1939,10 +2337,11 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
         className: log.className || "",
         role: "student",
       },
-      input: { preview: log.inputPreview || "" },
+      input: {},
+      inputSummary: { preview: log.displaySummary || "" },
       output: {
-        headings: (log.sections || []).map((section) => section.heading),
-        checks: log.checks || [],
+        headings: ["確認メタ情報"],
+        checks: log.checkCount ? [`提出前確認 ${log.checkCount}件`] : [],
       },
     }));
     const records = buildSafeGenerationLogExport((isDemoSession ? localRecords : serverRecords).map(sanitizeGenerationLogForExport));
@@ -1989,11 +2388,28 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
     setStatus("確認記録をCSVで書き出しました。");
   }
 
+  function retrySessionRestore() {
+    setSessionChecked(false);
+    setSessionRestoreError("");
+    setSessionRestoreAttempt((current) => current + 1);
+  }
+
   if (!sessionChecked) {
     return (
       <AppGateCard
         title={isPublicDemoSession ? "公開デモを準備しています" : "ログイン状態を確認しています"}
         description={isPublicDemoSession ? "架空データを読み込んでいます。" : "学校・クラス・ロール情報を読み込んでいます。"}
+      />
+    );
+  }
+
+  if (sessionRestoreError) {
+    return (
+      <AppGateCard
+        title="サービスに接続できません"
+        description={sessionRestoreError}
+        actionLabel="再試行"
+        onAction={retrySessionRestore}
       />
     );
   }
@@ -2011,7 +2427,11 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
 
   return (
     <main id="main-content" className="app-shell app-only">
-      <section className={`workspace ${isStudent ? "student-workspace" : ""}`} id="demo" aria-label="実習記録の問い返しと提出前の自己確認">
+      <section
+        className={`workspace ${isStudent ? "student-workspace" : ""}`}
+        id="demo"
+        aria-label={isStudent ? "実習記録の問い返しと提出前の自己確認" : "実習後の学生支援確認"}
+      >
         <aside className="sidebar">
           <div className="brand">
             <img className="app-brand-icon" src="/images/manalio-logo-icon.svg" alt="" aria-hidden="true" />
@@ -2027,7 +2447,7 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
             <div className="trust-tags">
               <span>省察支援</span>
               <span>安全確認</span>
-              <span>確認レビュー</span>
+              <span>実習後支援</span>
             </div>
           </div>}
 
@@ -2046,21 +2466,8 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
             </button>
           </div>
 
-          {!isStudent && (
-            <div className="usage-panel compact-panel staff-summary-card">
-              <div>
-                <span className="label">利用スナップショット</span>
-                <strong>{staffMetrics.students ?? 0}人</strong>
-              </div>
-            <div className="staff-summary-list">
-                <span>確認記録 {staffMetrics.generations ?? generationCount}件</span>
-                <span>確認候補 {staffMetrics.reviewCandidates ?? schoolSummary?.reviewQueue?.length ?? 0}件</span>
-                <span>振り返り {staffMetrics.feedback ?? feedbackCount}件</span>
-              </div>
-            </div>
-          )}
 
-          {(!isStudent || visibleNavItems.length > 1) && (
+          {visibleNavItems.length > 1 && (
             <nav className="nav-list" aria-label="機能">
               {visibleNavItems.map(([view, label]) => (
                 <button
@@ -2077,7 +2484,7 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
           )}
 
           {!isStudent && <div className="note">
-            <span className="label">導入方針</span>
+            <span className="label">支援方針</span>
             <p>学生が一般AIの出力を十分に見直さずに使うことを防ぎ、授業内で安全な問い返しとして使える形にします。</p>
           </div>}
         </aside>
@@ -2086,19 +2493,23 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
           {currentView === "diary" && (
             <DiaryView
               diary={diary}
+              schoolFormat={activeSchoolFormat}
               tone={tone}
               busy={busy}
+              status={status}
               samples={diarySamples}
               selectedSampleId={selectedSampleId}
               feedback={feedback}
               onToneChange={setTone}
               onChange={updateDiary}
               onEpisodeChange={updateDiaryEpisode}
+              onApplyStudentChatStarterPatch={applyStudentChatStarterPatch}
               onAddEpisode={addDiaryEpisode}
               onRemoveEpisode={removeDiaryEpisode}
               onFeedbackChange={updateFeedback}
               onSubmit={handleDiarySubmit}
               onSample={loadDiarySample}
+              onStudentChatAssist={handleStudentChatAssist}
               flowStep={studentFlowStep}
               privacyReview={privacyReview}
               checkedPayload={checkedPayload}
@@ -2110,7 +2521,6 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
               onConfirmSend={handleConfirmedGenerate}
               onFinalDraftChange={(value) => {
                 setFinalDraft(value);
-                setFinalCheck(null);
               }}
               onFinalCheck={handleFinalDraftCheck}
               onUseSanitizedFinal={useSanitizedFinalDraft}
@@ -2124,35 +2534,13 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
 
           {currentView === "school" && (
             <SchoolAdminView
-              feedbackCount={feedbackCount}
-              generationCount={generationCount}
               schoolSummary={schoolSummary}
               schoolSummaryStatus={schoolSummaryStatus}
+              schoolFormat={activeSchoolFormat}
               session={session}
               isPublicDemoSession={isPublicDemoSession}
-              enableLogExports={ENABLE_LOG_EXPORTS}
-              onExportGenerationCsv={() => exportGenerationLogs("csv")}
-              onExportGenerationJson={() => exportGenerationLogs("json")}
             />
           )}
-
-          {currentView === "assignments" && (
-            <AssignmentManagementView schoolSummary={schoolSummary} schoolSummaryStatus={schoolSummaryStatus} session={session} />
-          )}
-
-          {currentView === "students" && (
-            <StudentManagementView schoolSummary={schoolSummary} schoolSummaryStatus={schoolSummaryStatus} session={session} />
-          )}
-
-          {currentView === "review" && (
-            <TeacherReviewView schoolSummary={schoolSummary} schoolSummaryStatus={schoolSummaryStatus} session={session} />
-          )}
-
-          {currentView === "formats" && (
-            <FormatSettingsView session={session} />
-          )}
-
-          {currentView === "pass" && <SchoolPlanView hasPracticePass={hasPracticePass} onActivate={activatePracticePass} />}
         </section>
 
         {!isStudent && currentView === "diary" && (
@@ -2185,8 +2573,8 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
                   <h3>実習先フィードバックを踏まえた明日の観察</h3>
                   <p>{buildFeedbackNextSteps(feedback).focus}を意識し、実習先で受けた助言を翌日の具体的な観察に戻します。</p>
                   <ul>
-                    {buildFeedbackNextSteps(feedback).observationPoints.map((point) => (
-                      <li key={point}>{point}</li>
+                    {buildFeedbackNextSteps(feedback).observationPoints.map((point, index) => (
+                      <li key={`${point}-${index}`}>{point}</li>
                     ))}
                   </ul>
                 </section>
@@ -2194,8 +2582,8 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
               <section className="result-section">
                 <h3>提出前の自己確認</h3>
                 <ul>
-                  {result.checks.map((check) => (
-                    <li key={check}>{check}</li>
+                  {result.checks.map((check, index) => (
+                    <li key={`${check}-${index}`}>{check}</li>
                   ))}
                 </ul>
               </section>
@@ -2208,11 +2596,11 @@ export function AppExperience({ publicDemoRole = "", publicDemoReturnHref = "/de
   );
 }
 
-function AppGateCard({ title, description, actionLabel, actionHref }) {
+function AppGateCard({ title, description, actionLabel, actionHref, onAction }) {
   return (
     <main id="main-content" className="login-shell">
       <section className="login-card" aria-label={title}>
-        <a className="lp-brand login-brand" href="/">
+        <a className="lp-brand login-brand" href="/" aria-label="Manalioトップページへ">
           <img className="login-logo-horizontal" src="/images/manalio-logo-horizontal.svg" alt="Manalio" />
         </a>
         <div className="login-copy">
@@ -2220,9 +2608,13 @@ function AppGateCard({ title, description, actionLabel, actionHref }) {
           <h1>{title}</h1>
           <p>{description}</p>
         </div>
-        {actionHref && (
+        {(actionHref || onAction) && (
           <div className="login-actions single-action">
-            <a className="primary-button login-link" href={actionHref}>{actionLabel}</a>
+            {actionHref ? (
+              <a className="primary-button login-link" href={actionHref}>{actionLabel}</a>
+            ) : (
+              <button className="primary-button login-link" type="button" onClick={onAction}>{actionLabel}</button>
+            )}
           </div>
         )}
       </section>
@@ -2230,7 +2622,16 @@ function AppGateCard({ title, description, actionLabel, actionHref }) {
   );
 }
 
-function FeedbackPanel({ feedback, onChange }) {
+function FeedbackPanel({
+  feedback,
+  onChange,
+  onFocusFeedbackField,
+  receivedRef,
+  interpretationRef,
+  unclearRef,
+  tomorrowActionRef,
+  teacherQuestionRef,
+}) {
   const nextSteps = buildFeedbackNextSteps(feedback);
   const privacyCheck = buildClientPrivacyCheck(feedback);
   return (
@@ -2244,35 +2645,40 @@ function FeedbackPanel({ feedback, onChange }) {
       <p className="feedback-note">
         受けた助言は、要点だけを自分の言葉で整理します。迷う部分は、担当教員への相談に残せます。
       </p>
+      <FeedbackActionBridge feedback={feedback} onFocusField={onFocusFeedbackField} />
       <div className="feedback-field-grid">
         <TextAreaField
           label="助言の要点"
           value={feedback.received}
+          inputRef={receivedRef}
           placeholder="例：子どもの姿だけでなく、保育者の関わりにも目を向けるとよいと助言を受けた。"
           onChange={(value) => onChange("received", value)}
         />
         <TextAreaField
           label="自分の理解"
           value={feedback.interpretation}
+          inputRef={interpretationRef}
           placeholder="例：子どもの行動だけで終わらず、声かけ前後の変化を見る必要があると理解した。"
           onChange={(value) => onChange("interpretation", value)}
         />
         <TextAreaField
           label="まだ迷っていること"
           value={feedback.unclear}
+          inputRef={unclearRef}
           placeholder="例：保育者の意図を、どこまで自分の考察として書いてよいか分からない。"
           onChange={(value) => onChange("unclear", value)}
         />
         <TextAreaField
           label="明日、見たいこと・試したいこと"
           value={feedback.tomorrowAction}
+          inputRef={tomorrowActionRef}
           placeholder="例：声かけの前後で子どもの姿がどう変わったかをメモする。"
           onChange={(value) => onChange("tomorrowAction", value)}
         />
       </div>
       <label className="feedback-comment">
         学校の担当教員に相談したいこと
-        <textarea value={feedback.teacherQuestion} rows={3} placeholder="例：保育者の関わりを観察するとき、特に見るべき点を確認したい。" onChange={(event) => onChange("teacherQuestion", event.target.value)} />
+        <textarea ref={teacherQuestionRef} value={feedback.teacherQuestion} rows={3} placeholder="例：保育者の関わりを観察するとき、特に見るべき点を確認したい。" onChange={(event) => onChange("teacherQuestion", event.target.value)} />
       </label>
       {(privacyCheck.blockers.length > 0 || privacyCheck.warnings.length > 0 || privacyCheck.notes.length > 0) && (
         <PrivacyCheckPanel check={privacyCheck} mode="compact" />
@@ -2289,6 +2695,37 @@ function FeedbackPanel({ feedback, onChange }) {
         </div>
       )}
     </section>
+  );
+}
+
+function FeedbackActionBridge({ feedback, onFocusField }) {
+  const items = buildFeedbackActionItems(feedback);
+  const nextItem = items.find((item) => !item.done) || items[items.length - 1];
+  return (
+    <div className="feedback-action-bridge" aria-label="実習先フィードバックを翌日の行動へ戻す">
+      <div className="feedback-action-head">
+        <div>
+          <span className="label">助言を明日の行動へ戻す</span>
+          <strong>{nextItem.done ? "入力した助言を見直す" : `${nextItem.title}を書く`}</strong>
+        </div>
+        <em>{nextItem.done ? "書いた欄を見直せます" : `次に書く欄: ${nextItem.title}`}</em>
+      </div>
+      <div className="feedback-action-steps" aria-label="助言整理の順番">
+        {items.map((item, index) => (
+          <button
+            className={`feedback-action-step ${item.done ? "done" : ""}`}
+            type="button"
+            key={item.target}
+            aria-label={`${item.title}の${item.done ? "欄を確認" : "欄へ移動"}`}
+            onClick={() => onFocusField(item.target)}
+          >
+            <span>{index + 1}</span>
+            <strong>{item.title}</strong>
+            <small>{item.done ? "書いた欄を見直す" : item.body}</small>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -2320,19 +2757,21 @@ function PrivacyCheckPanel({ check, mode = "default" }) {
   );
 }
 
-function TextAreaField({ label, value, placeholder, onChange }) {
+function TextAreaField({ label, value, placeholder, onChange, inputRef }) {
   return (
     <label className="feedback-comment compact">
       {label}
-      <textarea value={value} rows={3} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <textarea ref={inputRef} value={value} rows={3} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
 
 function DiaryView({
   diary,
+  schoolFormat,
   tone,
   busy,
+  status,
   samples,
   selectedSampleId,
   feedback,
@@ -2346,11 +2785,13 @@ function DiaryView({
   onToneChange,
   onChange,
   onEpisodeChange,
+  onApplyStudentChatStarterPatch,
   onAddEpisode,
   onRemoveEpisode,
   onFeedbackChange,
   onSubmit,
   onSample,
+  onStudentChatAssist,
   onFlowStepChange,
   onConfirmSend,
   onFinalDraftChange,
@@ -2373,9 +2814,13 @@ function DiaryView({
     [diary, feedback],
   );
   const feedbackNextSteps = buildFeedbackNextSteps(feedback);
+  const scaffoldDraft = result
+    ? buildDiaryScaffoldDraft(checkedPayload, result, feedbackNextSteps)
+    : "";
   const canConfirm = Boolean(privacyReview && checkedPayload);
   const canRevise = Boolean(result);
   const canFinal = Boolean(finalCheck);
+  const showStepNavigation = flowStep !== "input" || canConfirm || canRevise || canFinal;
 
   return (
     <div className={`view-panel student-flow-panel step-${flowStep}`}>
@@ -2383,35 +2828,44 @@ function DiaryView({
         <div>
           <span className="label">今日の実習記録</span>
           <h2>{getStudentFlowTitle(flowStep)}</h2>
-          <p>{getStudentFlowDescription(flowStep)}</p>
+          {flowStep !== "input" && <p>{getStudentFlowDescription(flowStep)}</p>}
         </div>
-        <StudentFlowTabs
-          activeStep={flowStep}
-          canConfirm={canConfirm}
-          canRevise={canRevise}
-          canFinal={canFinal}
-          onChange={onFlowStepChange}
-        />
+        {showStepNavigation && (
+          <StudentFlowTabs
+            activeStep={flowStep}
+            canConfirm={canConfirm}
+            canRevise={canRevise}
+            canFinal={canFinal}
+            onChange={onFlowStepChange}
+          />
+        )}
       </div>
-      <StudentLearningRail activeStep={flowStep} />
+
+      {status && (
+        <p className="student-operation-status" role="status" aria-live="polite">{status}</p>
+      )}
 
       {flowStep === "input" && (
         <StudentInputStep
           diary={diary}
+          schoolFormat={schoolFormat}
           tone={tone}
           busy={busy}
           samples={samples}
           selectedSampleId={selectedSampleId}
           feedback={feedback}
           privacyCheck={privacyCheck}
+          initialInputMode={privacyReview ? "format" : "chat"}
           onToneChange={onToneChange}
           onChange={onChange}
           onEpisodeChange={onEpisodeChange}
+          onApplyStudentChatStarterPatch={onApplyStudentChatStarterPatch}
           onAddEpisode={onAddEpisode}
           onRemoveEpisode={onRemoveEpisode}
           onFeedbackChange={onFeedbackChange}
           onSubmit={onSubmit}
           onSample={onSample}
+          onStudentChatAssist={onStudentChatAssist}
           onReset={onReset}
         />
       )}
@@ -2431,6 +2885,7 @@ function DiaryView({
           result={result}
           feedbackNextSteps={feedbackNextSteps}
           checkedPayload={checkedPayload}
+          scaffoldDraft={scaffoldDraft}
           finalDraft={finalDraft}
           copied={copied}
           busy={busy}
@@ -2444,6 +2899,7 @@ function DiaryView({
       {flowStep === "final" && (
         <StudentFinalStep
           finalDraft={finalDraft}
+          scaffoldDraft={scaffoldDraft}
           finalCheck={finalCheck}
           copied={copied}
           busy={busy}
@@ -2458,63 +2914,20 @@ function DiaryView({
   );
 }
 
-function StudentLearningRail({ activeStep }) {
-  const rails = [
-    {
-      id: "input",
-      label: "型に沿って書く",
-      title: "学校の日誌項目を埋める",
-      body: "目標の振り返り、エピソード、総合的な気づき、明日の取り組みに分けます。",
-    },
-    {
-      id: "confirm",
-      label: "記録前に整える",
-      title: "特定につながる表現を確認",
-      body: "名前、園名、断定表現を提出前に見直し、必要なら置き換えます。",
-    },
-    {
-      id: "revise",
-      label: "比べて直す",
-      title: "元の記録と叩き台を並べる",
-      body: "AIの叩き台をそのまま使わず、入力と見比べながら自分の言葉に直します。",
-    },
-    {
-      id: "final",
-      label: "明日の観察へ戻す",
-      title: "自分の言葉で提出前確認",
-      body: "問いを手がかりに、翌日見ることと相談点を自分で整えます。",
-    },
-  ];
-  return (
-    <div className="student-learning-rail" aria-label="Manalioの学習の流れ">
-      {rails.map((rail, index) => (
-        <article key={rail.id} className={activeStep === rail.id ? "active" : ""}>
-          <span>{index + 1}</span>
-          <div>
-            <em>{rail.label}</em>
-            <strong>{rail.title}</strong>
-            <p>{rail.body}</p>
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
-
 function getStudentFlowTitle(step) {
   return {
-    input: "学校フォーマットで実習記録を書く",
+    input: "今日の実習を一つずつ振り返る",
     confirm: "安全な表現を確認する",
-    revise: "元の記録と叩き台を比べて直す",
+    revise: "元の記録と整理案を比べて直す",
     final: "提出前に記録を確認する",
-  }[step] || "学校フォーマットで実習記録を書く";
+  }[step] || "今日の実習を一つずつ振り返る";
 }
 
 function getStudentFlowDescription(step) {
   return {
     input: "学校の日誌項目に沿って、まず自分の言葉で書きます。エピソード数は学校の型に合わせて増減できます。",
     confirm: "Manalioが安全な表現に整えた内容を確認します。ここで納得してから問い返しへ進みます。",
-    revise: "安全確認後の元文章とAIの叩き台を横に並べ、足りない根拠や違う表現を自分で直します。",
+    revise: "安全確認後の元文章と整理案を横に並べ、足りない根拠や違う表現を自分で直します。",
     final: "提出前に、学生が自分で書いた記録へ個人情報や要配慮情報が残っていないか確認します。",
   }[step] || "";
 }
@@ -2548,192 +2961,1230 @@ function StudentFlowTabs({ activeStep, canConfirm, canRevise, canFinal, onChange
 
 function StudentInputStep({
   diary,
+  schoolFormat,
   tone,
   busy,
   samples,
   selectedSampleId,
   feedback,
   privacyCheck,
+  initialInputMode,
   onToneChange,
   onChange,
   onEpisodeChange,
+  onApplyStudentChatStarterPatch,
   onAddEpisode,
   onRemoveEpisode,
   onFeedbackChange,
   onSubmit,
   onSample,
+  onStudentChatAssist,
   onReset,
 }) {
   const episodes = normalizeDiaryEpisodes(diary.episodes, diary.memo, diary.reflection);
-  const memoReady = hasDiaryInputText(diary);
-  const supportCount = [
-    diary.goalReflection,
-    ...episodes.flatMap((episode) => [episode.memo, episode.insight]),
-    diary.overallLearning,
-    diary.nextAction,
-    feedback.received || feedback.interpretation || feedback.tomorrowAction || feedback.teacherQuestion,
-  ].filter((value) => String(value || "").trim()).length;
+  const fieldRefs = useRef({});
+  const diaryFieldLabels = buildStudentDiaryFieldLabels(schoolFormat);
+  const diaryRequirements = buildStudentDiaryRequirements(schoolFormat);
+  const minimumPathItems = buildStudentMinimumPathItems(diary, schoolFormat);
+  const writingCoach = buildStudentWritingCoach(diary, feedback, schoolFormat);
+  const selfReviewPrompts = buildStudentSelfReviewPrompts(diary, feedback, schoolFormat);
+  const readyForSafetyCheck = writingCoach.readyForSafetyCheck;
+  const supportCount = writingCoach.doneCount;
+  const [inputMode, setInputMode] = useState(initialInputMode === "format" ? "format" : "chat");
+  const [chatOrganization, setChatOrganization] = useState(null);
+  const [chatSource, setChatSource] = useState(null);
+  const [chatConversation, setChatConversation] = useState(null);
+  const [chatOrganizationError, setChatOrganizationError] = useState("");
+  const formatHeadingRef = useRef(null);
+  const comparisonRef = useRef(null);
+
+  useEffect(() => {
+    if (inputMode === "chat") return;
+    window.requestAnimationFrame(() => {
+      const target = inputMode === "compare" ? comparisonRef.current : formatHeadingRef.current;
+      target?.focus();
+      target?.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+  }, [inputMode]);
+
+  function registerStudentField(key) {
+    return (element) => {
+      if (element) fieldRefs.current[key] = element;
+    };
+  }
+
+  function getStudentFieldKey(target, mode = "write") {
+    if (target === "episodeMemo") {
+      const episodeIndex = mode === "review" ? getEpisodeReviewIndex(episodes, "memo") : getEpisodeStarterIndex(episodes, "memo");
+      return `episodeMemo:${episodeIndex}`;
+    }
+    if (target === "episodeInsight") {
+      const episodeIndex = mode === "review" ? getEpisodeReviewIndex(episodes, "insight") : getEpisodeStarterIndex(episodes, "insight");
+      return `episodeInsight:${episodeIndex}`;
+    }
+    if (target === "feedbackReceived") return "feedbackReceived";
+    if (target === "feedbackInterpretation") return "feedbackInterpretation";
+    if (target === "feedbackUnclear") return "feedbackUnclear";
+    if (target === "feedbackTomorrowAction") return "feedbackTomorrowAction";
+    if (target === "feedbackTeacherQuestion") return "feedbackTeacherQuestion";
+    return target;
+  }
+
+  function focusStudentField(target, mode = "write") {
+    const element = fieldRefs.current[getStudentFieldKey(target, mode)];
+    if (!element) return;
+    element.focus();
+    element.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function openOrganizationComparison() {
+    if (!chatOrganization || !chatSource) return;
+    setChatOrganizationError("");
+    setInputMode("compare");
+  }
+
+  function applyOrganizationToFormat() {
+    if (!isStudentChatSourceCurrent({ source: chatSource, diary })) {
+      setChatOrganizationError("元メモが変わったため、古い書き出し補助は置きません。現在の学校フォーマットを続けるか、チャットで整理し直してください。");
+      setChatOrganization(null);
+      setChatSource(null);
+      setChatConversation(null);
+      setInputMode("format");
+      return;
+    }
+    const starterPatch = buildStudentChatDiaryStarterPatch({ organization: chatOrganization, source: chatSource });
+    setChatOrganizationError("");
+    onApplyStudentChatStarterPatch(starterPatch);
+    setInputMode("format");
+  }
+
+  function loadSampleWithoutStaleComparison(sample) {
+    setChatOrganization(null);
+    setChatSource(null);
+    setChatConversation(null);
+    setChatOrganizationError("");
+    onSample(sample);
+  }
+
+  function resetStudentInput() {
+    setChatOrganization(null);
+    setChatSource(null);
+    setChatConversation(null);
+    setChatOrganizationError("");
+    setInputMode("chat");
+    onReset();
+  }
+
   return (
     <div className="student-step-card">
-      <div className="student-entry-card" aria-label="入力の入口">
-        <div className="student-entry-main">
-          <span className="label">次にすること</span>
-          <strong>{memoReady ? "安全確認へ進めます" : "日誌の項目に沿って書く"}</strong>
-          <p>
-            {memoReady
-              ? "下のボタンで、問い返し前の本文を確認します。意味が変わっていなければ次へ進みます。"
-              : "入力例を選ぶか、今日の目標振り返り・エピソード・気づき・明日の取り組みのどれかから書き始めてください。"}
-          </p>
-        </div>
-        <div className="student-entry-steps" aria-label="入力から問い返しまで">
-          <span><em>1</em>フォーマット記入</span>
-          <span><em>2</em>安全確認</span>
-          <span><em>3</em>叩き台と比較</span>
-        </div>
-        <p className="student-entry-safety">
-          名前や園名などは、問い返し前に安全な表現へ整えて確認します。実在の学生・子ども・園を少し置き換えた入力は避けてください。
-        </p>
-        <em className="student-entry-chip">{supportCount >= 3 ? "比較用の叩き台を作れます" : "書ける欄から埋めれば進めます"}</em>
-      </div>
-      <div className="student-writing-lens" aria-label="入力で分けること">
-        <article>
-          <span>目標</span>
-          <strong>今日の振り返り</strong>
-          <p>その日の実習目標に対して、何を見て何が難しかったかを書きます。</p>
-        </article>
-        <article>
-          <span>場面</span>
-          <strong>エピソード</strong>
-          <p>子どもの姿、自分の関わり、その場面からの気づきを分けます。</p>
-        </article>
-        <article>
-          <span>まとめ</span>
-          <strong>総合的な気づき</strong>
-          <p>複数の場面から、保育者として大切にしたいことへつなげます。</p>
-        </article>
-      </div>
-
-      <SampleLibrary title="安全な架空入力例" description="選ぶと主要な入力欄が入ります。自由入力でもそのまま進めます。" samples={samples} selectedSampleId={selectedSampleId} onSelect={onSample} />
-
-      <form className="form-grid" onSubmit={onSubmit}>
-        <div className="form-section-title wide">
-          <span>1</span>
-          <div>
-            <strong>学校フォーマット</strong>
-            <p>この型は学校ごとに変えられる前提です。まずは今の学校の日誌に近い形で試します。</p>
-          </div>
-        </div>
-        <label className="wide">
-          その日の実習目標に対する振り返り
-          <textarea value={diary.goalReflection || ""} rows={4} placeholder={"例：子ども同士の関わりを観察することを目標にしていた。自由遊びでは、A児とB児のやり取りを見たが、どこまで見守るか判断に迷った。"} onChange={(event) => onChange("goalReflection", event.target.value)} />
-        </label>
-        <div className="episode-editor wide">
-          <div className="episode-editor-head">
-            <div>
-              <strong>エピソード</strong>
-              <p>学校の指定に合わせて増減できます。各エピソード内にも、その場面からの気づきを入れます。</p>
-            </div>
-            <button className="secondary-button compact" type="button" onClick={onAddEpisode}>エピソードを追加</button>
-          </div>
-          <div className="episode-list">
-            {episodes.map((episode, index) => (
-              <article className="episode-card" key={episode.id || index}>
-                <div className="episode-card-head">
-                  <strong>エピソード{index + 1}</strong>
-                  <button className="secondary-button compact" type="button" onClick={() => onRemoveEpisode(index)} disabled={episodes.length <= 1}>
-                    削除
-                  </button>
+      {inputMode === "chat" ? (
+        <StudentChatCaptureStep
+          readyForSafetyCheck={readyForSafetyCheck}
+          diary={diary}
+          episodes={episodes}
+          schoolFormat={schoolFormat}
+          initialConversation={chatConversation}
+          onChange={onChange}
+          onEpisodeChange={onEpisodeChange}
+          onStudentChatAssist={onStudentChatAssist}
+          onOrganizationReady={({ organization, source, conversation }) => {
+            setChatOrganization(organization);
+            setChatSource(source);
+            setChatConversation(conversation);
+            setChatOrganizationError("");
+          }}
+          onUseOrganization={openOrganizationComparison}
+          onOpenFormat={() => setInputMode("format")}
+        />
+      ) : inputMode === "compare" ? (
+        <div className="student-chat-compare-step">
+          {chatOrganizationError && <p className="student-chat-error" role="alert">{chatOrganizationError}</p>}
+          {chatOrganization && chatSource ? (
+            <>
+              <StudentChatOrganizationCompare
+                source={chatSource}
+                organization={chatOrganization}
+                schoolFormat={schoolFormat}
+                focusRef={comparisonRef}
+              />
+              <div className="student-chat-compare-actions">
+                <p>比較を確認してから、学校フォーマットへ進みます。</p>
+                <div className="actions">
+                  <button className="primary-button" type="button" onClick={applyOrganizationToFormat}>学校フォーマットへ反映して直す</button>
+                  <button className="secondary-button" type="button" onClick={() => setInputMode("chat")}>チャットに戻る</button>
                 </div>
-                <label>
-                  場面・子どもの姿・自分の関わり
-                  <textarea value={episode.memo || ""} rows={5} placeholder={"例：A児がブロックで線路を作っていた。B児が近づくと、A児はブロックを手で押さえた。私は少し見守った。"} onChange={(event) => onEpisodeChange(index, "memo", event.target.value)} />
-                </label>
-                <label>
-                  このエピソードからの気づき・感じたこと
-                  <textarea value={episode.insight || ""} rows={3} placeholder={"例：すぐに間に入る前に、子ども同士で調整する姿を見ることも大切だと感じた。"} onChange={(event) => onEpisodeChange(index, "insight", event.target.value)} />
-                </label>
-              </article>
-            ))}
+              </div>
+            </>
+          ) : (
+            <p className="student-chat-error" role="alert">比較する内容がありません。チャットに戻って出来事を整理してください。</p>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="student-entry-card" aria-label="入力の入口">
+            <div className="student-entry-main">
+              <span className="label">次にすること</span>
+              <strong>{readyForSafetyCheck ? "安全確認へ進めます" : "学校フォーマットで確認する"}</strong>
+              <p>
+                {readyForSafetyCheck
+                  ? "下のボタンで、問い返し前の本文を確認します。意味が変わっていなければ次へ進みます。"
+                  : "チャットで出した一言を、学校フォーマットの欄で直します。迷った時だけ補助を開きます。"}
+              </p>
+            </div>
+            <button
+              className="secondary-button compact student-chat-return"
+              type="button"
+              onClick={() => setInputMode(chatOrganization && chatSource ? "compare" : "chat")}
+            >
+              {chatOrganization && chatSource ? "比較に戻る" : "チャットに戻る"}
+            </button>
+            <em className="student-entry-chip">{supportCount >= 3 ? "比較用の整理案を作れます" : "書ける欄から埋めれば進めます"}</em>
           </div>
-        </div>
-        <label className="wide">
-          保育者として大切にしなければならないことの気づき
-          <textarea value={diary.overallLearning || ""} rows={5} placeholder={"エピソード全体を通しての総合的な気づき。\n例：子どもの行動だけを見るのではなく、言葉に出ていない気持ちや、友だちとの関係の変化を丁寧に見ることが大切だと感じた。"} onChange={(event) => onChange("overallLearning", event.target.value)} />
-        </label>
-        <label className="wide">
-          次の日取り組みたいこと
-          <textarea value={diary.nextAction || ""} rows={4} placeholder={"例：自由遊びで子ども同士のやり取りが起きた時、すぐに声をかけず、言葉・視線・物の渡し方を少し観察する。"} onChange={(event) => onChange("nextAction", event.target.value)} />
-        </label>
-        <div className="form-section-title wide">
-          <span>2</span>
-          <div>
-            <strong>実習先で受けた助言</strong>
-            <p>受けた指導がある時だけ、自分の理解と翌日の観察に戻します。</p>
-          </div>
-        </div>
-        <div className="wide">
-          <FeedbackPanel
-            feedback={feedback}
-            onChange={onFeedbackChange}
-          />
-        </div>
-        <details className="optional-inputs wide">
-          <summary>必要な時だけ、日付・年齢・ねらいを直す</summary>
-          <div className="optional-input-grid">
-            <label>
-              日付
-              <input aria-label="日付" type="date" value={diary.date} onChange={(event) => onChange("date", event.target.value)} />
+
+          {chatOrganizationError && <p className="student-chat-error" role="alert">{chatOrganizationError}</p>}
+
+          <form className="form-grid" onSubmit={onSubmit}>
+            <div className="form-section-title wide" ref={formatHeadingRef} tabIndex={-1}>
+              <span>1</span>
+              <div>
+                <strong>学校フォーマット</strong>
+                <p>今日見た場面、そこからの気づき、明日見る一点を順番に書きます。</p>
+              </div>
+            </div>
+            {hasMeaningfulText(diary.goal) && (
+              <aside className="student-goal-reference wide" aria-label="チャットで答えた実習目標">
+                <span>チャットで答えた実習目標</span>
+                <p>{diary.goal}</p>
+              </aside>
+            )}
+            <label className="wide">
+              {diaryFieldLabels.goalReflection}
+              <textarea ref={registerStudentField("goalReflection")} value={diary.goalReflection || ""} rows={4} placeholder={"例：子ども同士の関わりを観察することを目標にしていた。自由遊びでは、A児とB児のやり取りを見たが、どこまで見守るか判断に迷った。"} onChange={(event) => onChange("goalReflection", event.target.value)} />
             </label>
-            <label>
-              天気
-              <select aria-label="天気" value={diary.weather} onChange={(event) => onChange("weather", event.target.value)}>
-                {["晴れ", "くもり", "雨", "雪"].map((weather) => <option key={weather}>{weather}</option>)}
-              </select>
-            </label>
-            <label>
-              クラス・年齢
-              <select aria-label="クラス・年齢" value={diary.age} onChange={(event) => onChange("age", event.target.value)}>
-                {["0歳児クラス", "1歳児クラス", "2歳児クラス", "3歳児クラス", "4歳児クラス", "5歳児クラス", "異年齢保育"].map((age) => <option key={age}>{age}</option>)}
-              </select>
-            </label>
-            <label>
-              場面
-              <select aria-label="場面" value={diary.scene} onChange={(event) => onChange("scene", event.target.value)}>
-                {["朝の自由遊び", "戸外遊び", "製作活動", "食事", "午睡", "帰りの会", "部分実習"].map((scene) => <option key={scene}>{scene}</option>)}
-              </select>
+            <div className="episode-editor wide">
+              <div className="episode-editor-head">
+                <div>
+                  <strong>{diaryFieldLabels.episodeMemo}</strong>
+                  <p>この学校では{diaryRequirements.episodes.requiredCount}件が必要です。最大{diaryRequirements.episodes.maxCount}件まで追加できます。</p>
+                </div>
+                <button className="secondary-button compact" type="button" onClick={onAddEpisode} disabled={episodes.length >= diaryRequirements.episodes.maxCount}>エピソードを追加</button>
+              </div>
+              <div className="episode-list">
+                {episodes.map((episode, index) => (
+                  <article className="episode-card" key={episode.id || index}>
+                    <div className="episode-card-head">
+                      <strong>{diaryFieldLabels.episodeMemo}{index + 1}</strong>
+                      <button className="secondary-button compact" type="button" onClick={() => onRemoveEpisode(index)} disabled={episodes.length <= diaryRequirements.episodes.minCount}>
+                        削除
+                      </button>
+                    </div>
+                    <label>
+                      {diaryFieldLabels.episodeMemo}の場面・子どもの姿・自分の関わり
+                      <textarea ref={registerStudentField(`episodeMemo:${index}`)} value={episode.memo || ""} rows={5} placeholder={"例：A児がブロックで線路を作っていた。B児が近づくと、A児はブロックを手で押さえた。私は少し見守った。"} onChange={(event) => onEpisodeChange(index, "memo", event.target.value)} />
+                    </label>
+                    <label>
+                      {diaryFieldLabels.episodeInsight}
+                      <small>この{diaryFieldLabels.episodeMemo}からの気づき・感じたこと</small>
+                      <textarea ref={registerStudentField(`episodeInsight:${index}`)} value={episode.insight || ""} rows={3} placeholder={"例：すぐに間に入る前に、子ども同士で調整する姿を見ることも大切だと感じた。"} onChange={(event) => onEpisodeChange(index, "insight", event.target.value)} />
+                    </label>
+                  </article>
+                ))}
+              </div>
+            </div>
+            <label className="wide">
+              {diaryFieldLabels.overallLearning}
+              <textarea ref={registerStudentField("overallLearning")} value={diary.overallLearning || ""} rows={5} placeholder={"エピソード全体を通しての総合的な気づき。\n例：子どもの行動だけを見るのではなく、言葉に出ていない気持ちや、友だちとの関係の変化を丁寧に見ることが大切だと感じた。"} onChange={(event) => onChange("overallLearning", event.target.value)} />
             </label>
             <label className="wide">
-              今日のねらい
-              <input aria-label="今日のねらい" value={diary.goal} placeholder="例：子ども同士の関わりを観察し、保育者の援助を学ぶ" onChange={(event) => onChange("goal", event.target.value)} />
+              {diaryFieldLabels.nextAction}
+              <textarea ref={registerStudentField("nextAction")} value={diary.nextAction || ""} rows={4} placeholder={"例：自由遊びで子ども同士のやり取りが起きた時、すぐに声をかけず、言葉・視線・物の渡し方を少し観察する。"} onChange={(event) => onChange("nextAction", event.target.value)} />
             </label>
-          </div>
-        </details>
-        <details className="advanced-options wide">
-          <summary>必要な時だけ、問い返しの深さを変える</summary>
-          <div className="mode-switch" role="group" aria-label="問い返しの深さ">
-            {[
-              ["short", "短め"],
-              ["balanced", "標準"],
-              ["deep", "深め"],
-            ].map(([value, label]) => (
-              <button key={value} className={`mode ${tone === value ? "active" : ""}`} type="button" aria-label={`問い返しの深さ: ${label}`} onClick={() => onToneChange(value)}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </details>
-        {(privacyCheck.blockers.length > 0 || privacyCheck.warnings.length > 0 || privacyCheck.notes.length > 0) && (
-          <div className="wide">
-            <PrivacyCheckPanel check={privacyCheck} />
-          </div>
-        )}
-        <div className="actions wide">
-          <button className="primary-button" type="submit" disabled={busy || !memoReady}>{busy ? "安全確認中..." : memoReady ? "安全な表現を確認" : "日誌項目を入力すると進めます"}</button>
-          <button className="secondary-button" type="button" onClick={onReset}>クリア</button>
-        </div>
-      </form>
+            <details className="student-feedback-details wide">
+              <summary>
+                <div>
+                  <span className="label">必要な時だけ</span>
+                  <strong>実習先で受けた助言を記録する</strong>
+                  <p>受けた指導がある時だけ、自分の理解と翌日の観察に戻します。</p>
+                </div>
+              </summary>
+              <FeedbackPanel
+                feedback={feedback}
+                onChange={onFeedbackChange}
+                onFocusFeedbackField={focusStudentField}
+                receivedRef={registerStudentField("feedbackReceived")}
+                interpretationRef={registerStudentField("feedbackInterpretation")}
+                unclearRef={registerStudentField("feedbackUnclear")}
+                tomorrowActionRef={registerStudentField("feedbackTomorrowAction")}
+                teacherQuestionRef={registerStudentField("feedbackTeacherQuestion")}
+              />
+            </details>
+            <details className="optional-inputs wide">
+              <summary>必要な時だけ、日付・年齢・ねらいを直す</summary>
+              <div className="optional-input-grid">
+                <label>
+                  日付
+                  <input aria-label="日付" type="date" value={diary.date} onChange={(event) => onChange("date", event.target.value)} />
+                </label>
+                <label>
+                  天気
+                  <select aria-label="天気" value={diary.weather} onChange={(event) => onChange("weather", event.target.value)}>
+                    {["晴れ", "くもり", "雨", "雪"].map((weather) => <option key={weather}>{weather}</option>)}
+                  </select>
+                </label>
+                <label>
+                  クラス・年齢
+                  <select aria-label="クラス・年齢" value={diary.age} onChange={(event) => onChange("age", event.target.value)}>
+                    {["0歳児クラス", "1歳児クラス", "2歳児クラス", "3歳児クラス", "4歳児クラス", "5歳児クラス", "異年齢保育"].map((age) => <option key={age}>{age}</option>)}
+                  </select>
+                </label>
+                <label>
+                  場面
+                  <select aria-label="場面" value={diary.scene} onChange={(event) => onChange("scene", event.target.value)}>
+                    {["朝の自由遊び", "戸外遊び", "製作活動", "食事", "午睡", "帰りの会", "部分実習"].map((scene) => <option key={scene}>{scene}</option>)}
+                  </select>
+                </label>
+                <label className="wide">
+                  今日のねらい
+                  <input aria-label="今日のねらい" value={diary.goal} placeholder="例：子ども同士の関わりを観察し、保育者の援助を学ぶ" onChange={(event) => onChange("goal", event.target.value)} />
+                </label>
+              </div>
+            </details>
+            <details className="advanced-options wide">
+              <summary>必要な時だけ、問い返しの深さを変える</summary>
+              <div className="mode-switch" role="group" aria-label="問い返しの深さ">
+                {[
+                  ["short", "短め"],
+                  ["balanced", "標準"],
+                  ["deep", "深め"],
+                ].map(([value, label]) => (
+                  <button key={value} className={`mode ${tone === value ? "active" : ""}`} type="button" aria-label={`問い返しの深さ: ${label}`} onClick={() => onToneChange(value)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </details>
+            {(privacyCheck.blockers.length > 0 || privacyCheck.warnings.length > 0 || privacyCheck.notes.length > 0) && (
+              <div className="wide">
+                <PrivacyCheckPanel check={privacyCheck} />
+              </div>
+            )}
+            <StudentSubmitReadiness coach={writingCoach} onFocusTarget={focusStudentField} />
+            <div className="actions wide">
+              <button className="primary-button" type="submit" disabled={busy || !readyForSafetyCheck}>{busy ? "安全確認中..." : readyForSafetyCheck ? "安全な表現を確認" : "必要な欄を先に書く"}</button>
+              <button className="secondary-button" type="button" onClick={resetStudentInput}>クリア</button>
+            </div>
+            <StudentSelfReviewPanel prompts={readyForSafetyCheck || selectedSampleId ? selfReviewPrompts : []} onFocusTarget={focusStudentField} />
+          </form>
+          <StudentSupportDetails
+            minimumPathItems={minimumPathItems}
+            writingCoach={writingCoach}
+            diary={diary}
+            episodes={episodes}
+            feedback={feedback}
+            diaryFieldLabels={diaryFieldLabels}
+            samples={samples}
+            selectedSampleId={selectedSampleId}
+            onSample={loadSampleWithoutStaleComparison}
+            onChange={onChange}
+            onEpisodeChange={onEpisodeChange}
+            onFeedbackChange={onFeedbackChange}
+            onFocusStudentField={focusStudentField}
+          />
+        </>
+      )}
     </div>
   );
+}
+
+function StudentChatCaptureStep({
+  readyForSafetyCheck,
+  diary,
+  episodes,
+  schoolFormat,
+  initialConversation,
+  onChange,
+  onEpisodeChange,
+  onStudentChatAssist,
+  onOrganizationReady,
+  onUseOrganization,
+  onOpenFormat,
+}) {
+  const diaryFieldLabels = buildStudentDiaryFieldLabels(schoolFormat);
+  const initialEpisodeIndex = getStudentChatEpisodeIndex(episodes);
+  const initialEpisodeMemo = episodes[initialEpisodeIndex]?.memo || "";
+  const restoredConversation = initialConversation?.stage === "review" ? initialConversation : null;
+  const [stage, setStage] = useState(() => restoredConversation?.stage || getInitialStudentChatStage(diary, episodes));
+  const [episodeIndex, setEpisodeIndex] = useState(initialEpisodeIndex);
+  const [answer, setAnswer] = useState("");
+  const [apiReply, setApiReply] = useState(() => restoredConversation?.apiReply || null);
+  const [apiBusy, setApiBusy] = useState(false);
+  const [apiError, setApiError] = useState("");
+  const [followUpQuestion, setFollowUpQuestion] = useState(() => restoredConversation?.followUpQuestion || (hasMeaningfulText(initialEpisodeMemo)
+    ? "その時、自分はどのように関わり、その後どのような姿が見られましたか。"
+    : ""));
+  const [chatAnswers, setChatAnswers] = useState(() => restoredConversation?.chatAnswers || ({
+    goal: hasMeaningfulText(diary.goal) ? String(diary.goal).trim() : "",
+    episode: hasMeaningfulText(initialEpisodeMemo) ? String(initialEpisodeMemo).trim() : "",
+    detail: "",
+  }));
+  const answerInputRef = useRef(null);
+  const alertRef = useRef(null);
+  const threadRef = useRef(null);
+  const requestInFlightRef = useRef(false);
+  const guidance = getStudentChatCaptureCopy(stage, apiReply, readyForSafetyCheck);
+  const normalizedAnswer = answer.trim();
+  const answerReady = hasMeaningfulText(normalizedAnswer);
+  const organization = getStudentChatOrganizationForComparison(stage, apiReply);
+
+  useEffect(() => {
+    setAnswer("");
+    if (stage !== "review") {
+      window.requestAnimationFrame(() => {
+        answerInputRef.current?.focus();
+      });
+    }
+  }, [stage]);
+
+  useEffect(() => {
+    const hasGoal = hasMeaningfulText(diary.goal);
+    const hasEpisode = episodes.some((episode) => hasMeaningfulText(episode.memo));
+    if (!hasGoal && !hasEpisode) {
+      setStage("goal");
+      setEpisodeIndex(getStudentChatEpisodeIndex(episodes));
+      setChatAnswers({ goal: "", episode: "", detail: "" });
+      setFollowUpQuestion("");
+      setApiReply(null);
+      setApiError("");
+      return;
+    }
+    if (stage === "goal" && hasGoal) {
+      setChatAnswers((current) => current.goal
+        ? current
+        : { ...current, goal: String(diary.goal).trim() });
+      setStage(hasEpisode ? "detail" : "episode");
+    }
+  }, [diary.goal, episodes, stage]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (thread) thread.scrollTop = thread.scrollHeight;
+  }, [apiBusy, chatAnswers.detail, chatAnswers.episode, chatAnswers.goal, stage]);
+
+  useEffect(() => {
+    if (!apiError) return;
+    window.requestAnimationFrame(() => {
+      alertRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }, [apiError]);
+
+  async function applyAnswer(event) {
+    event?.preventDefault();
+    if (stage === "review" || !answerReady || apiBusy || requestInFlightRef.current) return;
+    const answerText = normalizedAnswer;
+    if (stage === "goal") {
+      const localPrivacyCheck = buildClientPrivacyCheck({ goal: answerText });
+      if (localPrivacyCheck.blockers.length > 0 || localPrivacyCheck.warnings.length > 0) {
+        setApiError("実習目標に個人や実習先が分かる表現があります。名前や園名を外してから保存してください。");
+        return;
+      }
+      onChange("goal", answerText);
+      setChatAnswers((current) => ({ ...current, goal: answerText }));
+      setAnswer("");
+      setApiReply(null);
+      setApiError("");
+      setStage("episode");
+      return;
+    }
+
+    const localPrivacyCheck = buildClientPrivacyCheck({ memo: answerText });
+    if (localPrivacyCheck.blockers.length > 0 || localPrivacyCheck.warnings.length > 0) {
+      setApiError("個人や実習先が分かる表現があります。名前や園名を外してから送信してください。");
+      return;
+    }
+
+    const currentEpisodeMemo = episodes[episodeIndex]?.memo || "";
+    const requestStage = stage === "episode" ? "episode" : "organize";
+    requestInFlightRef.current = true;
+    setApiBusy(true);
+    setApiError("");
+    try {
+      const reply = await onStudentChatAssist({
+        stage: requestStage,
+        target: "episodeMemo",
+        practiceGoal: diary.goal,
+        episodeMemo: currentEpisodeMemo,
+        answer: answerText,
+      });
+      const nextEpisodeMemo = appendStarterText(currentEpisodeMemo, answerText);
+      onEpisodeChange(episodeIndex, "memo", nextEpisodeMemo);
+      setAnswer("");
+      setApiReply(reply);
+      if (requestStage === "organize") {
+        const completedChatAnswers = { ...chatAnswers, detail: answerText };
+        setChatAnswers(completedChatAnswers);
+        const source = {
+          practiceGoal: diary.goal,
+          episodeMemo: nextEpisodeMemo,
+          episodeIndex,
+        };
+        onOrganizationReady?.({
+          organization: reply.organization || createEmptyStudentChatOrganization(),
+          source,
+          conversation: {
+            stage: "review",
+            apiReply: reply,
+            chatAnswers: completedChatAnswers,
+            followUpQuestion,
+          },
+        });
+        setStage("review");
+      } else {
+        setChatAnswers((current) => ({ ...current, episode: answerText }));
+        setFollowUpQuestion(reply.nextQuestion || "その時、自分はどのように関わり、その後どのような姿が見られましたか。");
+        setStage("detail");
+      }
+    } catch (error) {
+      setApiError(error?.message || "AIの返答を取得できませんでした。入力は残っているため、そのまま再試行できます。");
+    } finally {
+      requestInFlightRef.current = false;
+      setApiBusy(false);
+    }
+  }
+
+  function openFormat() {
+    if (requestInFlightRef.current) return;
+    if (normalizedAnswer.length > 0) {
+      const localPrivacyCheck = buildClientPrivacyCheck(
+        stage === "goal" ? { goal: normalizedAnswer } : { memo: normalizedAnswer },
+      );
+      if (localPrivacyCheck.blockers.length > 0 || localPrivacyCheck.warnings.length > 0) {
+        setApiError("個人や実習先が分かる表現があります。名前や園名を外してから学校フォーマットへ進んでください。");
+        return;
+      }
+      if (stage === "goal") {
+        onChange("goal", normalizedAnswer);
+      } else if (stage === "episode" || stage === "detail") {
+        onEpisodeChange(episodeIndex, "memo", appendStarterText(episodes[episodeIndex]?.memo, normalizedAnswer));
+      }
+    }
+    onOpenFormat();
+  }
+
+  const progressLabel = stage === "goal"
+    ? "1 / 3　実習目標"
+    : stage === "review"
+      ? "3 / 3　整理完了"
+      : stage === "detail"
+        ? "2 / 3　追加確認"
+        : "2 / 3　出来事";
+  const messages = [
+    {
+      id: "goal-question",
+      role: "assistant",
+      title: "その日の実習目標",
+      body: getStudentChatCaptureCopy("goal").question,
+    },
+  ];
+
+  if (chatAnswers.goal) {
+    messages.push(
+      { id: "goal-answer", role: "user", body: chatAnswers.goal },
+      {
+        id: "episode-question",
+        role: "assistant",
+        title: "印象に残った出来事",
+        body: getStudentChatCaptureCopy("episode").question,
+      },
+    );
+  }
+
+  if (chatAnswers.goal && chatAnswers.episode) {
+    messages.push(
+      { id: "episode-answer", role: "user", body: chatAnswers.episode },
+      {
+        id: "detail-question",
+        role: "assistant",
+        title: "もう一つだけ確認",
+        body: followUpQuestion || getStudentChatCaptureCopy("detail").question,
+      },
+    );
+  }
+
+  if (chatAnswers.goal && chatAnswers.episode && chatAnswers.detail) {
+    messages.push(
+      { id: "detail-answer", role: "user", body: chatAnswers.detail },
+      {
+        id: "review-ready",
+        role: "assistant",
+        title: "整理できました",
+        body: "次の画面で元メモと書き出し補助を見比べ、【 】を今日の事実と自分の考えに直します。",
+      },
+    );
+  }
+
+  if (apiBusy) {
+    messages.push(
+      { id: "pending-answer", role: "user", body: normalizedAnswer, pending: true },
+      {
+        id: "pending-reply",
+        role: "assistant",
+        title: guidance.loadingTitle,
+        body: guidance.loadingMessage,
+        pending: true,
+      },
+    );
+  }
+
+  return (
+    <section className="student-chat-capture" aria-label="Manalioとの会話で実習記録を整理する">
+      <div className="student-chat-head">
+        <span className="label">Manalioとの会話</span>
+        <strong>{progressLabel}</strong>
+      </div>
+      <div
+        className="student-chat-thread"
+        ref={threadRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-busy={apiBusy}
+      >
+        {messages.map((message) => (
+          <div className={`student-chat-row ${message.role}`} key={message.id}>
+            <div className={`student-chat-bubble ${message.role} ${message.pending ? "loading" : ""}`}>
+              <span>{message.role === "assistant" ? "Manalio" : "あなた"}</span>
+              {message.title && <strong>{message.title}</strong>}
+              <p>{message.body}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {stage !== "review" ? (
+        <form className="student-chat-composer" onSubmit={applyAnswer}>
+          <label htmlFor="student-chat-answer">{guidance.inputLabel}</label>
+          {apiError && (
+            <p id="student-chat-error" className="student-chat-error" role="alert" ref={alertRef}>
+              {apiError}
+            </p>
+          )}
+          <div className="student-chat-composer-row">
+            <textarea
+              id="student-chat-answer"
+              ref={answerInputRef}
+              value={answer}
+              rows={3}
+              maxLength={1200}
+              placeholder={guidance.placeholder}
+              disabled={apiBusy}
+              aria-invalid={apiError ? "true" : undefined}
+              aria-describedby={apiError ? "student-chat-error student-chat-help" : "student-chat-help"}
+              onChange={(event) => {
+                setAnswer(event.target.value);
+                if (apiError) setApiError("");
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                if (answerReady && !apiBusy) event.currentTarget.form?.requestSubmit();
+              }}
+            />
+            <button className="primary-button student-chat-send" type="submit" disabled={!answerReady || apiBusy}>
+              {apiBusy ? "確認中..." : "送信"}
+            </button>
+          </div>
+          <div className="student-chat-composer-meta">
+            <p id="student-chat-help">{guidance.help}</p>
+            <button className="student-chat-format-link" type="button" onClick={openFormat} disabled={apiBusy}>学校フォーマットで書く</button>
+          </div>
+        </form>
+      ) : (
+        <div className="student-chat-complete-actions">
+          <button className="primary-button" type="button" onClick={onUseOrganization} disabled={!organization}>
+            元メモと書き出し補助を見比べる
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function getInitialStudentChatStage(diary, episodes) {
+  if (!hasMeaningfulText(diary.goal)) return "goal";
+  return episodes.some((episode) => hasMeaningfulText(episode.memo)) ? "detail" : "episode";
+}
+
+function getStudentChatEpisodeIndex(episodes) {
+  const filledIndex = episodes.findIndex((episode) => hasMeaningfulText(episode.memo));
+  return filledIndex >= 0 ? filledIndex : getEpisodeStarterIndex(episodes, "memo");
+}
+
+function getStudentChatCaptureCopy(stage, apiReply, readyForSafetyCheck) {
+  if (stage === "goal") {
+    return {
+      title: "その日の実習目標",
+      question: "今日の実習目標は何ですか。学校から示された文を、そのまま入れても大丈夫です。",
+      inputLabel: "実習目標",
+      placeholder: "例：子ども同士の関わりを観察し、保育者の援助を学ぶ。",
+      loadingTitle: "目標を保存しています",
+      loadingMessage: "次に、今日あった出来事を一つ聞きます。",
+      help: "学校から示された目標か、自分で決めた目標を入力します。",
+    };
+  }
+  if (stage === "episode") {
+    return {
+      title: "印象に残った出来事",
+      question: "今日いちばん覚えている出来事は何ですか。短いメモで大丈夫です。",
+      inputLabel: "出来事メモ",
+      placeholder: "例：自由遊びで、A児がブロックを持ってB児の近くにいた。",
+      loadingTitle: "追加の問いを作っています",
+      loadingMessage: "出来事を日誌に整理するため、足りない事実を一つだけ確認します。",
+      help: "名前や園名は入れず、A児、B児、実習先園のように書きます。",
+    };
+  }
+  if (stage === "detail") {
+    return {
+      title: "もう一つだけ確認",
+      question: apiReply?.nextQuestion || "その時、自分はどのように関わり、その後どのような姿が見られましたか。",
+      inputLabel: "追加メモ",
+      placeholder: "見たこと、自分がしたこと、その後に見られたことを一つだけ。",
+      loadingTitle: "整理案を作っています",
+      loadingMessage: "実習目標、出来事、追加メモだけを使って、専門的な見方と書き出しを整理します。",
+      help: "分からない部分は推測せず、分からないまま残して大丈夫です。",
+    };
+  }
+  return {
+    title: "元メモと書き出し補助を比べる",
+    question: apiReply?.nextQuestion || "事実と違う部分がないか確認してから、学校フォーマットで自分の文章に直します。",
+    inputLabel: "",
+    placeholder: "",
+    loadingTitle: "整理案を作っています",
+    loadingMessage: "",
+    help: readyForSafetyCheck
+      ? "整理案を置いた後も、提出前に自分の言葉と安全な表現を確認します。"
+      : "整理案は完成文ではありません。元メモにないことを削り、自分の言葉へ直します。",
+  };
+}
+
+function StudentChatOrganizationCompare({ source, organization, schoolFormat, focusRef }) {
+  if (!source || !organization) return null;
+  const diaryFieldLabels = buildStudentDiaryFieldLabels(schoolFormat);
+  const starterPatch = buildStudentChatDiaryStarterPatch({ organization, source });
+  const professionalReview = organization.professionalReview || {};
+  const organizedItems = [
+    { key: "episodeMemo", label: `${diaryFieldLabels.episodeMemo}（比較用の整理）`, value: organization.factSummary },
+    { key: "goalReflection", label: diaryFieldLabels.goalReflection, value: starterPatch.goalReflection },
+    { key: "episodeInsight", label: diaryFieldLabels.episodeInsight, value: starterPatch.episodeInsight },
+    { key: "overallLearning", label: diaryFieldLabels.overallLearning, value: starterPatch.overallLearning },
+    { key: "nextAction", label: diaryFieldLabels.nextAction, value: starterPatch.nextAction },
+  ].filter((item) => item.value);
+  return (
+    <section
+      className="student-chat-organization"
+      aria-label="元メモと書き出し補助の比較"
+      ref={focusRef}
+      tabIndex={-1}
+    >
+      <div className="student-chat-organization-head">
+        <strong>元メモと書き出し補助</strong>
+        <p>左は自分が書いた内容、右は書き始めるための型です。【 】の中を今日の事実と自分の考えに直します。</p>
+      </div>
+      <div className="student-chat-organization-grid">
+        <div className="student-chat-source">
+          <span>元メモ</span>
+          <dl>
+            <div><dt>実習目標</dt><dd>{source.practiceGoal || "未入力"}</dd></div>
+            <div><dt>出来事</dt><dd>{source.episodeMemo || "未入力"}</dd></div>
+          </dl>
+        </div>
+        <div className="student-chat-organized">
+          <span>書き出し補助</span>
+          <dl>
+            {organizedItems.map(({ key, label, value }) => (
+              <div key={key}><dt>{label}</dt><dd>{value}</dd></div>
+            ))}
+          </dl>
+          {(professionalReview.reason || professionalReview.revisionPrompt || organization.missingInformation) && (
+            <details className="student-chat-review-details">
+              <summary>見直す観点を確認</summary>
+              {professionalReview.focusText && <p><strong>見る箇所</strong>{professionalReview.focusText}</p>}
+              {professionalReview.reason && <p><strong>理由</strong>{professionalReview.reason}</p>}
+              {professionalReview.revisionPrompt && <p><strong>次に直すこと</strong>{professionalReview.revisionPrompt}</p>}
+              {organization.missingInformation && <p><strong>まだ確認すること</strong>{organization.missingInformation}</p>}
+            </details>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StudentSupportDetails({
+  minimumPathItems,
+  writingCoach,
+  diary,
+  episodes,
+  feedback,
+  diaryFieldLabels,
+  samples,
+  selectedSampleId,
+  onSample,
+  onChange,
+  onEpisodeChange,
+  onFeedbackChange,
+  onFocusStudentField,
+}) {
+  return (
+    <details className="student-support-details">
+      <summary className="student-support-summary">
+        <div>
+          <span className="label">必要な時だけ</span>
+          <strong>入力例・書き方補助を開く</strong>
+          <p>まずは学校フォーマットへ書きます。詰まった時だけ、最小ルートと30秒入口を使います。</p>
+        </div>
+        <span className="student-support-summary-action">開く</span>
+      </summary>
+      <div className="student-support-details-body">
+        <StudentMinimumPath items={minimumPathItems} onFocusTarget={onFocusStudentField} />
+        <StudentWritingCoachPanel
+          coach={writingCoach}
+          diary={diary}
+          episodes={episodes}
+          feedback={feedback}
+          onChange={onChange}
+          onEpisodeChange={onEpisodeChange}
+          onFeedbackChange={onFeedbackChange}
+          onFocusTarget={onFocusStudentField}
+        />
+        <details className="student-support-subdetails">
+          <summary>
+            <strong>安全な架空入力例を使う</strong>
+            <span>入力に迷う時だけ開く</span>
+          </summary>
+          <SampleLibrary title="安全な架空入力例" description="選ぶと主要な入力欄が入ります。自由入力でもそのまま進めます。" samples={samples} selectedSampleId={selectedSampleId} onSelect={onSample} />
+        </details>
+        <details className="student-support-subdetails">
+          <summary>
+            <strong>欄の見方を開く</strong>
+            <span>必要な欄だけ選ぶ</span>
+          </summary>
+          <div className="student-writing-lens" aria-label="入力で分けること">
+            <article>
+              <span>目標</span>
+              <strong>{diaryFieldLabels.goalReflection}</strong>
+              <p>その日の実習目標に対して、何を見て何が難しかったかを書きます。</p>
+            </article>
+            <article>
+              <span>場面</span>
+              <strong>{diaryFieldLabels.episodeMemo}</strong>
+              <p>子どもの姿、自分の関わり、その場面からの気づきを分けます。</p>
+            </article>
+            <article>
+              <span>まとめ</span>
+              <strong>{diaryFieldLabels.overallLearning}</strong>
+              <p>複数の場面から、保育者として大切にしたいことへつなげます。</p>
+            </article>
+          </div>
+        </details>
+      </div>
+    </details>
+  );
+}
+
+function StudentSelfReviewPanel({ prompts, onFocusTarget }) {
+  const visiblePrompts = safeRecordList(prompts).slice(0, 6);
+  if (!visiblePrompts.length) return null;
+  const reviewRouteLabels = visiblePrompts
+    .map((item) => item.formatLabel || item.label)
+    .slice(0, 6);
+
+  return (
+    <section className="student-self-review wide" aria-label="書いた欄の見直し">
+      <div className="student-self-review-head">
+        <div>
+          <span className="label">書いた欄の見直し</span>
+          <h3>自分の記録から直す</h3>
+        </div>
+        <div className="student-self-review-head-copy">
+          <p>空欄を埋める前に、すでに書いた欄だけを短く確認します。</p>
+          <small className="student-self-review-route">先に見る順: {reviewRouteLabels.join(" / ")}</small>
+        </div>
+      </div>
+      <div className="student-self-review-grid">
+        {visiblePrompts.map((item, index) => (
+          <article key={item.id}>
+            <span>見直し {index + 1}: {item.label}</span>
+            <strong>{item.title}</strong>
+            {item.formatLabel && <small>学校日誌欄: {item.formatLabel}</small>}
+            <p>{item.body}</p>
+            <em>{item.question}</em>
+            <button
+              className="student-field-jump"
+              type="button"
+              aria-label={`${item.formatLabel || item.label}の欄を見直す`}
+              onClick={() => onFocusTarget(item.target, "review")}
+            >
+              {item.actionLabel || "この欄を見直す"}
+            </button>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StudentSubmitReadiness({ coach, onFocusTarget }) {
+  const blockers = safeRecordList(coach?.safetyCheckBlockers).slice(0, 3);
+  const formatMissingItems = safeRecordList(coach?.formatMissingItems).slice(0, 5);
+  const readyForSafetyCheck = Boolean(coach?.readyForSafetyCheck);
+  const actionItems = readyForSafetyCheck ? formatMissingItems : blockers.slice(0, 1);
+  const firstFormatGapWithTargets = formatMissingItems.find((item) => safeList(item.replaceTargets).length > 0);
+
+  return (
+    <div className={`student-submit-readiness wide ${readyForSafetyCheck ? "ready" : ""}`} aria-live="polite">
+      <div>
+        <span className="label">安全確認まで</span>
+        <strong>{readyForSafetyCheck ? "安全確認へ進めます" : "次に1つだけ書く"}</strong>
+        <p>
+          {readyForSafetyCheck
+            ? "この後、名前や園名などが残っていないかを確認します。"
+            : "全部を一度に埋めようとせず、次の欄だけ先に書きます。"}
+        </p>
+        {readyForSafetyCheck && formatMissingItems.length > 0 && (
+          <>
+            <small>提出前に残る欄: {formatMissingItems.map((item) => item.formatLabel || item.label).join(" / ")}</small>
+            <small>{formatMissingItems.map((item) => item.reason).join(" ")}</small>
+          </>
+        )}
+      </div>
+      {readyForSafetyCheck && firstFormatGapWithTargets && (
+        <StudentReplaceTargets targets={firstFormatGapWithTargets.replaceTargets} />
+      )}
+      {actionItems.length > 0 && (
+        <div className="student-submit-readiness-actions">
+          {actionItems.map((item) => {
+            const label = item.formatLabel || item.label;
+            const actionLabel = readyForSafetyCheck ? `${label}を見直す` : label;
+            const actionAriaLabel = readyForSafetyCheck ? actionLabel : `${label}の欄へ移動`;
+            return (
+              <button
+                key={item.id}
+                className="student-field-jump"
+                type="button"
+                aria-label={actionAriaLabel}
+                onClick={() => onFocusTarget(item.target)}
+              >
+                {actionLabel}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StudentMinimumPath({ items, onFocusTarget }) {
+  const doneCount = items.filter((item) => item.done).length;
+  const remaining = Math.max(0, items.length - doneCount);
+  const nextItem = items.find((item) => !item.done);
+  return (
+    <section className="student-minimum-path" aria-label="最初に埋める三点">
+      <div className="student-minimum-head">
+        <div>
+          <span className="label">まずここだけ</span>
+          <h3>{remaining === 0 ? "安全確認へ進めます" : `次に置く欄: ${nextItem?.label || "場面"}`}</h3>
+        </div>
+        <p>完璧な日誌にしようとせず、一場面、気づき、明日の一点を先に置きます。</p>
+      </div>
+      <div className="student-minimum-grid">
+        {items.map((item, index) => (
+          <article key={item.label} className={item.done ? "done" : ""}>
+            <span>{index + 1}</span>
+            <div>
+              <em>{item.label}</em>
+              <strong>{item.title}</strong>
+              <p>{item.body}</p>
+              <button
+                className="student-minimum-jump"
+                type="button"
+                aria-label={`${item.formatLabel || item.label}の${item.done ? "欄を確認" : "欄へ移動"}`}
+                onClick={() => onFocusTarget(item.target, item.done ? "review" : "write")}
+              >
+                {item.done ? "欄を確認" : "欄へ移動"}
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function StudentFieldLens({ lens, label }) {
+  const rows = [
+    ["見る", lens?.look],
+    ["書く", lens?.write],
+    ["避ける", lens?.avoid],
+  ].filter(([, value]) => Boolean(value));
+  if (!rows.length) return null;
+  return (
+    <div className="student-field-lens" aria-label={`${label || "次の欄"}の見方`}>
+      {rows.map(([name, value]) => (
+        <span key={name}>
+          <em>{name}</em>
+          {value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function StudentInputState({ state }) {
+  if (!state) return null;
+  return (
+    <div className={`student-input-state ${state.level || "unknown"}`} aria-label="入力欄の状態">
+      <span>入力の状態</span>
+      <strong>{state.label}</strong>
+      <p>{state.help}</p>
+    </div>
+  );
+}
+
+function StudentReplaceTargets({ targets }) {
+  const items = safeList(targets).filter(Boolean).slice(0, 4);
+  if (!items.length) return null;
+  return (
+    <div className="student-replace-targets" aria-label="置き換える場所">
+      <span>置き換える場所</span>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function StudentWritingCoachPanel({ coach, diary, episodes, feedback, onChange, onEpisodeChange, onFeedbackChange, onFocusTarget }) {
+  const nextItem = coach?.nextItem;
+  const visibleItems = safeRecordList(coach?.items).filter((item) => item.required).slice(0, 5);
+  const preview = Array.isArray(coach?.preview) ? coach.preview : [];
+  const safetyCheckBlockers = safeRecordList(coach?.safetyCheckBlockers).slice(0, 3);
+  const formatMissingItems = safeRecordList(coach?.formatMissingItems).slice(0, 5);
+  const firstFormatGapWithTargets = formatMissingItems.find((item) => safeList(item.replaceTargets).length > 0);
+  const hasDetailedSupport = Boolean(
+    (!coach.readyForSafetyCheck && (
+      nextItem?.replaceTargets
+      || nextItem?.inputState
+      || nextItem?.microStep
+      || nextItem?.lens
+      || safetyCheckBlockers.length > 0
+      || visibleItems.length > 0
+      || preview.length > 0
+    ))
+    || (coach.readyForSafetyCheck && formatMissingItems.length > 0)
+  );
+
+  function applyCoachItem(item) {
+    if (!item?.starter) return;
+    if (item.target === "episodeMemo") {
+      const episodeIndex = getEpisodeStarterIndex(episodes, "memo");
+      const insertion = buildStarterInsertion(episodes[episodeIndex]?.memo, item.starter);
+      onEpisodeChange(episodeIndex, "memo", insertion.value, insertion.scaffold);
+    } else if (item.target === "episodeInsight") {
+      const episodeIndex = getEpisodeStarterIndex(episodes, "insight");
+      const insertion = buildStarterInsertion(episodes[episodeIndex]?.insight, item.starter);
+      onEpisodeChange(episodeIndex, "insight", insertion.value, insertion.scaffold);
+    } else if (item.target === "feedbackReceived") {
+      onFeedbackChange("received", appendStarterText(feedback.received, item.starter));
+    } else {
+      const insertion = buildStarterInsertion(diary[item.target], item.starter);
+      onChange(item.target, insertion.value, insertion.scaffold);
+    }
+    onFocusTarget(item.target);
+  }
+
+  return (
+    <section className="student-writing-coach" aria-label="日誌作成の補助">
+      <div className="student-writing-coach-main">
+        <span className="label">記録補助</span>
+        <h3>{coach.readyForSafetyCheck ? "次は安全確認です" : `次に書く欄: ${nextItem?.label || "場面"}`}</h3>
+        {!coach.readyForSafetyCheck && nextItem?.formatLabel && (
+          <span className="student-format-label">学校日誌欄: {nextItem.formatLabel}</span>
+        )}
+        <p>
+          {coach.readyForSafetyCheck
+            ? "提出前に自分の記録を整える前に、問い返し前の安全確認へ進めます。"
+            : nextItem?.question || "今日見た場面を一つ選び、実際に見たことから書き始めます。"}
+        </p>
+        {!coach.readyForSafetyCheck && nextItem && (
+          <div className="student-quick-start" aria-label="30秒で書き始める">
+            <div>
+              <span>30秒入口</span>
+              <strong>{nextItem.formatLabel || nextItem.label}に型だけ置く</strong>
+              <p>完成文ではありません。空欄を、今日見た事実・自分の関わり・次に見る一点へ置き換えてから進みます。</p>
+            </div>
+            <button className="student-quick-start-button" type="button" onClick={() => applyCoachItem(nextItem)}>
+              穴埋め型を置いて欄へ移動
+            </button>
+          </div>
+        )}
+        {!coach.readyForSafetyCheck && nextItem && (
+          <div className="student-coach-actions">
+            <button
+              className="student-field-jump"
+              type="button"
+              aria-label={`${nextItem.formatLabel || nextItem.label}の欄へ移動`}
+              onClick={() => onFocusTarget(nextItem.target)}
+            >
+              次に書く欄へ移動
+            </button>
+          </div>
+        )}
+      </div>
+      {hasDetailedSupport && (
+        <details className="student-writing-more">
+          <summary>
+            <strong>書き方の細かい補助を開く</strong>
+            <span>置き換える場所・欄ごとの確認</span>
+          </summary>
+          <div className="student-writing-more-body">
+            {!coach.readyForSafetyCheck && nextItem?.replaceTargets && (
+              <StudentReplaceTargets targets={nextItem.replaceTargets} />
+            )}
+            {!coach.readyForSafetyCheck && nextItem?.inputState && (
+              <StudentInputState state={nextItem.inputState} />
+            )}
+            {!coach.readyForSafetyCheck && nextItem?.microStep && (
+              <div className="student-micro-step" aria-label={`${nextItem.label}の1分メモ`}>
+                <span>1分メモ</span>
+                <strong>{nextItem.microStep.prompt}</strong>
+                <p>{nextItem.microStep.hint}</p>
+                {nextItem.nudge && <small className="student-next-nudge">次に足す一点: {nextItem.nudge}</small>}
+              </div>
+            )}
+            {!coach.readyForSafetyCheck && nextItem?.lens && (
+              <StudentFieldLens lens={nextItem.lens} label={nextItem.formatLabel || nextItem.label} />
+            )}
+            {!coach.readyForSafetyCheck && safetyCheckBlockers.length > 0 && (
+              <div className="student-safety-blockers" aria-label="安全確認へ進む前に必要なこと">
+                <span className="label">安全確認へ進む前に</span>
+                <strong>{safetyCheckBlockers.length}つだけ先に書く</strong>
+                <ul>
+                  {safetyCheckBlockers.map((item) => (
+                    <li key={item.id}>
+                      <span>{item.label}</span>
+                      <p>{item.reason}</p>
+                      {item.microStep?.prompt && <small>{item.microStep.prompt}</small>}
+                      <button
+                        className="student-field-jump"
+                        type="button"
+                        aria-label={`${item.formatLabel || item.label}の欄へ移動`}
+                        onClick={() => onFocusTarget(item.target)}
+                      >
+                        欄へ移動
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {coach.readyForSafetyCheck && formatMissingItems.length > 0 && (
+              <div className="student-format-gap" aria-label="提出前に残る欄">
+                <span className="label">提出前に残る欄</span>
+                <strong>{formatMissingItems.map((item) => item.label).join(" / ")}</strong>
+                <small>{formatMissingItems.map((item) => item.formatLabel || item.label).join(" / ")}</small>
+                <p>安全確認へは進めます。提出前には、学校フォーマットとして残る欄も見直します。</p>
+                {formatMissingItems.map((item) => <p key={`${item.id}-reason`}>{item.reason}</p>)}
+                {firstFormatGapWithTargets && (
+                  <StudentReplaceTargets targets={firstFormatGapWithTargets.replaceTargets} />
+                )}
+                <div className="student-format-gap-actions">
+                  {formatMissingItems.map((item) => (
+                    <button
+                      key={item.id}
+                      className="student-field-jump"
+                      type="button"
+                      aria-label={`${item.formatLabel || item.label}の欄へ移動`}
+                      onClick={() => onFocusTarget(item.target)}
+                    >
+                      {item.formatLabel || item.label}へ移動
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="student-writing-progress" aria-label="学校日誌欄ごとの入力状態">
+              <div className="student-writing-progress-head">
+                <div>
+                  <span className="label">今日の欄</span>
+                  <strong>{coach.readyForSafetyCheck ? "安全確認へ進める状態" : `次に直す欄: ${nextItem?.label || "場面"}`}</strong>
+                </div>
+                <p>学校フォーマット全体で、各欄の状態と次に足す一点をここから確認します。</p>
+              </div>
+              {visibleItems.map((item) => {
+                const isCurrentItem = item.id === nextItem?.id;
+                return (
+                  <article key={item.id} className={item.done ? "done" : ""}>
+                    <span>{item.label}</span>
+                    <strong>{item.title}</strong>
+                    {item.formatLabel && <small>学校日誌欄: {item.formatLabel}</small>}
+                    {item.inputState && (
+                      <small className={`student-input-status ${item.inputState.level || "unknown"}`}>
+                        欄の状態: {item.inputState.label}{isCurrentItem && item.inputState.help ? `。${item.inputState.help}` : ""}
+                      </small>
+                    )}
+                    {isCurrentItem && <p>{item.body}</p>}
+                    {!item.done && item.nudge && <em className="student-progress-nudge">足す一点: {item.nudge}</em>}
+                    <button
+                      className="student-progress-jump"
+                      type="button"
+                      aria-label={`${item.formatLabel || item.label}の${item.done ? "欄を確認" : "欄へ移動"}`}
+                      onClick={() => onFocusTarget(item.target, item.done ? "review" : "write")}
+                    >
+                      {item.done ? "欄を確認" : "この欄へ移動"}
+                    </button>
+                  </article>
+                );
+              })}
+            </div>
+            {preview.length > 0 && (
+              <div className="student-writing-preview" aria-label="ここまでの記録">
+                {preview.slice(0, 4).map((item) => (
+                  <span key={item}>{item}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function appendStarterText(currentValue, starterText) {
+  return buildStarterInsertion(currentValue, starterText).value;
+}
+
+function buildStarterInsertion(currentValue, starterText) {
+  const current = String(currentValue || "").trim();
+  if (!current) return { value: starterText, scaffold: starterText };
+  if (current.includes(starterText)) return { value: current, scaffold: "" };
+  return { value: `${current}\n\n${starterText}`, scaffold: starterText };
+}
+
+function getEpisodeStarterIndex(episodes, field) {
+  const normalized = normalizeDiaryEpisodes(episodes);
+  const emptyIndex = normalized.findIndex((episode) => !hasStudentAuthoredText(episode[field]));
+  if (emptyIndex >= 0) return emptyIndex;
+  return Math.max(0, normalized.length - 1);
+}
+
+function getEpisodeReviewIndex(episodes, field) {
+  const normalized = normalizeDiaryEpisodes(episodes);
+  const writtenIndex = normalized.findIndex((episode) => hasStudentAuthoredText(episode[field]));
+  if (writtenIndex >= 0) return writtenIndex;
+  return getEpisodeStarterIndex(normalized, field);
 }
 
 function StudentConfirmStep({ review, checkedPayload, busy, onBack, onConfirm }) {
@@ -2767,7 +4218,7 @@ function StudentConfirmStep({ review, checkedPayload, busy, onBack, onConfirm })
   );
 }
 
-function StudentReviseStep({ result, feedbackNextSteps, checkedPayload, finalDraft, copied, busy, onBack, onCopyResult, onFinalDraftChange, onFinalCheck }) {
+function StudentReviseStep({ result, feedbackNextSteps, checkedPayload, scaffoldDraft, finalDraft, copied, busy, onBack, onCopyResult, onFinalDraftChange, onFinalCheck }) {
   if (!result) {
     return (
       <section className="student-step-card empty-step">
@@ -2780,103 +4231,235 @@ function StudentReviseStep({ result, feedbackNextSteps, checkedPayload, finalDra
   const resultSections = normalizeResultSections(result);
   const resultChecks = normalizeResultChecks(result);
   const sourceText = buildDiarySourceText(checkedPayload);
-  const scaffoldDraft = buildDiaryScaffoldDraft(checkedPayload, result, feedbackNextSteps);
+  const draftText = scaffoldDraft || buildDiaryScaffoldDraft(checkedPayload, result, feedbackNextSteps);
+  const draftReadiness = getStudentDraftEditReadiness(finalDraft, draftText);
+  const finalDraftEdited = draftReadiness.ready;
+  const revisionChecklist = buildStudentRevisionChecklist(checkedPayload, result, feedbackNextSteps);
+  const revisionOrder = buildStudentRevisionOrder(checkedPayload, result, feedbackNextSteps);
+  const hasFinalDraftInput = hasMeaningfulText(finalDraft);
   return (
     <section className="student-step-card ai-step" aria-label="問い返し結果と提出前の記録作成">
       <div className="ai-step-head">
         <div>
           <span className="label">比較して直す</span>
-          <h3>元の記録とAIの叩き台を見比べます</h3>
+          <h3>元の記録と整理案を見比べます</h3>
         </div>
         <button className="secondary-button compact" type="button" onClick={onCopyResult}>
           {copied ? "コピー済み" : "問いをコピー"}
         </button>
       </div>
-      <section className="draft-comparison" aria-label="元の記録とAIの叩き台の比較">
+      <section className="draft-comparison" aria-label="元の記録と整理案の比較">
         <article className="comparison-column source">
           <span className="label">元の記録</span>
           <h4>安全確認後の本文</h4>
           <p>{sourceText || "安全確認後の本文がここに表示されます。"}</p>
         </article>
         <article className="comparison-column draft">
-          <span className="label">AIの叩き台</span>
+          <span className="label">整理案</span>
           <h4>自分で直すための下書き</h4>
-          <p>{scaffoldDraft}</p>
-          <button className="secondary-button compact" type="button" onClick={() => onFinalDraftChange(scaffoldDraft)}>
-            叩き台を編集欄に置く
+          <p>{draftText}</p>
+          <button className="secondary-button compact" type="button" onClick={() => onFinalDraftChange(draftText)}>
+            整理案を編集欄に置く
           </button>
         </article>
       </section>
       <div className="review-confirm-note draft-note">
         <strong>ここで見ること</strong>
-        <p>叩き台は完成文ではありません。元の記録にない事実、言いすぎた表現、実習先や教員に確認したい点を直してから提出前チェックへ進みます。</p>
+        <p>元の記録に戻しながら、自分の言葉で整えるための材料です。元の記録にない事実、言いすぎた表現、実習先や教員に確認したい点を直してから提出前チェックへ進みます。</p>
       </div>
-      <article className="result inline-result">
-        {resultSections.map((section, index) => (
-          <section className="result-section" key={`${section.heading}-${index}`}>
-            <h3>{section.heading}</h3>
-            <p>{section.body}</p>
-          </section>
-        ))}
-        {feedbackNextSteps.hasContent && (
-          <section className="result-section feedback-result-section">
-            <h3>実習先フィードバックを踏まえた明日の観察</h3>
-            <p>{feedbackNextSteps.focus}を意識し、実習先で受けた助言を翌日の具体的な観察に戻します。</p>
-            <ul>
-              {feedbackNextSteps.observationPoints.map((point) => (
-                <li key={point}>{point}</li>
-              ))}
-            </ul>
-          </section>
-        )}
-        <section className="result-section">
-          <h3>提出前の自己確認</h3>
-          <ul>
-            {resultChecks.map((check) => (
-              <li key={check}>{check}</li>
-            ))}
-          </ul>
-        </section>
-      </article>
+      <StudentFeedbackCarryover feedbackNextSteps={feedbackNextSteps} />
       <label className="final-draft-editor">
         自分で整えた記録
         <textarea value={finalDraft} rows={8} placeholder={FINAL_DRAFT_PLACEHOLDER} onChange={(event) => onFinalDraftChange(event.target.value)} />
       </label>
+      {hasFinalDraftInput && !finalDraftEdited && (
+        <div className="review-confirm-note draft-readiness-note" role="status" aria-live="polite">
+          <strong>{draftReadiness.title}</strong>
+          <p>{draftReadiness.body}</p>
+        </div>
+      )}
       <div className="actions">
         <button className="secondary-button" type="button" onClick={onBack}>確認画面に戻る</button>
-        <button className="primary-button" type="button" onClick={onFinalCheck} disabled={busy || !hasMeaningfulText(finalDraft)}>
-          {busy ? "確認中..." : "提出前チェックへ進む"}
+        <button className="primary-button" type="button" onClick={onFinalCheck} disabled={busy || !hasFinalDraftInput || !finalDraftEdited}>
+          {busy ? "確認中..." : finalDraftEdited ? "提出前チェックへ進む" : draftReadiness.actionLabel}
         </button>
       </div>
+      <details className="student-revision-help">
+        <summary>
+          <span className="label">補助</span>
+          <strong>直す順番と問いを見る</strong>
+        </summary>
+        <div className="student-revision-help-body">
+          <section className="student-revision-order" aria-label="整理案を直す順番">
+            <div>
+              <span className="label">直す順番</span>
+              <h4>削る、つなぐ、明日の一点に戻す</h4>
+            </div>
+            <div className="student-revision-order-list">
+              {revisionOrder.map((item) => (
+                <article key={item.id}>
+                  <span>{item.label}</span>
+                  <strong>{item.title}</strong>
+                  <p>{item.body}</p>
+                  <em>{item.prompt}</em>
+                </article>
+              ))}
+            </div>
+          </section>
+          <section className="student-revision-checklist" aria-label="整理案を直す観点">
+            <div>
+              <span className="label">直す観点</span>
+              <h4>元の記録と違うところを先に見る</h4>
+            </div>
+            <div className="student-revision-grid">
+              {revisionChecklist.map((item, index) => (
+                <article key={`${item.label}-${item.title}-${index}`}>
+                  <span>{item.label}</span>
+                  <strong>{item.title}</strong>
+                  <p>{item.body}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+          <article className="result inline-result">
+            {resultSections.map((section, index) => (
+              <section className="result-section" key={`${section.heading}-${index}`}>
+                <h3>{section.heading}</h3>
+                <p>{section.body}</p>
+              </section>
+            ))}
+            {feedbackNextSteps.hasContent && (
+              <section className="result-section feedback-result-section">
+                <h3>実習先フィードバックを踏まえた明日の観察</h3>
+                <p>{feedbackNextSteps.focus}を意識し、実習先で受けた助言を翌日の具体的な観察に戻します。</p>
+                <ul>
+                  {feedbackNextSteps.observationPoints.map((point, index) => (
+                    <li key={`${point}-${index}`}>{point}</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <section className="result-section">
+              <h3>提出前の自己確認</h3>
+              <ul>
+                {resultChecks.map((check, index) => (
+                  <li key={`${check}-${index}`}>{check}</li>
+                ))}
+              </ul>
+            </section>
+          </article>
+        </div>
+      </details>
     </section>
   );
 }
 
-function StudentFinalStep({ finalDraft, finalCheck, copied, busy, onFinalDraftChange, onFinalCheck, onUseSanitizedFinal, onCopyFinal, onBack }) {
+function StudentFeedbackCarryover({ feedbackNextSteps }) {
+  if (!feedbackNextSteps?.hasContent) return null;
+  return (
+    <section className="student-feedback-carryover" aria-label="実習先助言の見直し">
+      <div>
+        <span className="label">実習先助言</span>
+        <h4>本文の飾りにせず、明日見る一点へ戻す</h4>
+        <p>{feedbackNextSteps.focus}を、記録本文の説明ではなく、翌日の観察や相談点へ戻します。</p>
+      </div>
+      <ul>
+        {safeList(feedbackNextSteps.observationPoints).slice(0, 2).map((point) => (
+          <li key={point}>{point}</li>
+        ))}
+      </ul>
+      <small>判断に迷う点は、断定して書かず学校の担当教員への相談として残します。</small>
+    </section>
+  );
+}
+
+function StudentFinalStep({ finalDraft, scaffoldDraft, finalCheck, copied, busy, onFinalDraftChange, onFinalCheck, onUseSanitizedFinal, onCopyFinal, onBack }) {
   const checkedText = normalizeMultiline(finalDraft);
   const sanitizedText = normalizeMultiline(finalCheck?.payload?.memo || "");
   const hasFinalDraftText = hasMeaningfulText(finalDraft);
-  const canCopyCheckedFinal = canUseFinalDraftAfterCheck(finalCheck, checkedText, sanitizedText);
+  const draftReadiness = getStudentDraftEditReadiness(checkedText, scaffoldDraft);
+  const finalDraftEdited = draftReadiness.ready;
+  const canCopyCheckedFinal = finalDraftEdited && canUseFinalDraftAfterCheck(finalCheck, checkedText, sanitizedText);
+  const recoveryGuide = buildStudentFinalCheckRecoveryGuide(finalCheck, checkedText, sanitizedText);
+  const needsSafeTextApply = Boolean(finalCheck?.changed && sanitizedText && checkedText !== sanitizedText);
+  const needsRecheckAfterSafeTextApply = Boolean(finalCheck?.changed && sanitizedText && checkedText === sanitizedText);
+  const focusFinalDraftEditor = () => {
+    document.getElementById("student-final-draft")?.focus();
+  };
+  const focusFinalDraftEditorAfterRender = () => {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(focusFinalDraftEditor);
+  };
+  const handleUseSanitizedFinal = () => {
+    onUseSanitizedFinal();
+    focusFinalDraftEditorAfterRender();
+  };
+  const handleRecoveryAction = (action) => {
+    if (action === "apply_sanitized") {
+      handleUseSanitizedFinal();
+      return;
+    }
+    if (action === "run_final_check") {
+      onFinalCheck();
+      return;
+    }
+    focusFinalDraftEditor();
+  };
   const copyLabel = copied
     ? "コピー済み"
+    : !finalDraftEdited
+      ? "自分の言葉で直すとコピーできます"
     : !finalCheck
       ? "チェック後にコピーできます"
+      : canCopyCheckedFinal
+        ? "記録をコピー"
       : finalCheck.blocked
         ? "見直すとコピーできます"
-        : finalCheck.changed && checkedText !== sanitizedText
-          ? "反映後にコピーできます"
-          : "記録をコピー";
+      : needsSafeTextApply
+        ? "反映後にコピーできます"
+      : needsRecheckAfterSafeTextApply || checkedText !== sanitizedText
+        ? "再チェック後にコピーできます"
+      : finalCheck.status !== "clear"
+        ? "見直すとコピーできます"
+      : "記録をコピー";
   return (
     <section className="student-step-card final-step" aria-label="提出前チェック">
       <label className="final-draft-editor">
         自分で整えた記録
-        <textarea value={finalDraft} rows={9} placeholder={FINAL_DRAFT_PLACEHOLDER} onChange={(event) => onFinalDraftChange(event.target.value)} />
+        <textarea id="student-final-draft" value={finalDraft} rows={9} placeholder={FINAL_DRAFT_PLACEHOLDER} onChange={(event) => onFinalDraftChange(event.target.value)} />
       </label>
       {finalCheck ? (
         <>
           <ReviewSummary review={finalCheck} compact />
           {finalCheck.changed && (
             <SanitizedPreview payload={finalCheck.payload} fields={["memo"]} title="安全化した提出前の記録" />
+          )}
+          {recoveryGuide.length > 0 && (
+            <section className="student-final-recovery" aria-label="提出前チェック後に直す順番" aria-live="polite">
+              <div>
+                <span className="label">直す順番</span>
+                <h3>コピー前に残った確認</h3>
+              </div>
+              <ol>
+                {recoveryGuide.map((item) => (
+                  <li key={item.id}>
+                    <span>{item.label}</span>
+                    <strong>{item.title}</strong>
+                    <p>{item.body}</p>
+                    <button
+                      className="student-minimum-jump"
+                      type="button"
+                      onClick={() => handleRecoveryAction(item.action)}
+                      disabled={busy && item.action === "run_final_check"}
+                      aria-controls={item.action === "run_final_check" ? undefined : "student-final-draft"}
+                      data-recovery-action={item.action}
+                    >
+                      {busy && item.action === "run_final_check" ? "確認中..." : item.actionLabel}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            </section>
           )}
         </>
       ) : (
@@ -2885,13 +4468,19 @@ function StudentFinalStep({ finalDraft, finalCheck, copied, busy, onFinalDraftCh
           <p>ここでは問い返しを増やさず、Manalio内のルールだけで個人情報や要配慮情報が残っていないか確認します。</p>
         </div>
       )}
+      {scaffoldDraft && hasFinalDraftText && !finalDraftEdited && (
+        <div className="review-confirm-note draft-readiness-note" role="status" aria-live="polite">
+          <strong>{draftReadiness.title}</strong>
+          <p>{draftReadiness.body}</p>
+        </div>
+      )}
       <div className="actions">
         <button className="secondary-button" type="button" onClick={onBack}>問い返しに戻る</button>
-        <button className="secondary-button" type="button" onClick={onFinalCheck} disabled={busy || !hasFinalDraftText}>{busy ? "確認中..." : "再チェック"}</button>
-        {finalCheck?.changed && (
-          <button className="secondary-button" type="button" onClick={onUseSanitizedFinal}>安全化した文を反映</button>
+        <button className="secondary-button" type="button" onClick={onFinalCheck} disabled={busy || !hasFinalDraftText || !finalDraftEdited}>{busy ? "確認中..." : "再チェック"}</button>
+        {needsSafeTextApply && (
+          <button className="secondary-button" type="button" onClick={handleUseSanitizedFinal} aria-controls="student-final-draft" data-recovery-action="apply_sanitized">安全化した文を反映</button>
         )}
-        <button className="primary-button" type="button" onClick={onCopyFinal} disabled={!hasFinalDraftText || !canCopyCheckedFinal}>
+        <button className="primary-button" type="button" onClick={onCopyFinal} disabled={!hasFinalDraftText || !finalDraftEdited || !canCopyCheckedFinal}>
           {copyLabel}
         </button>
       </div>
@@ -3003,970 +4592,662 @@ function SampleLibrary({ title, description, samples, selectedSampleId = "", onS
   );
 }
 
-function SchoolAdminView({ feedbackCount, generationCount, schoolSummary, schoolSummaryStatus, session, isPublicDemoSession = false, enableLogExports, onExportGenerationCsv, onExportGenerationJson }) {
+function SchoolAdminView({ schoolSummary, schoolSummaryStatus, schoolFormat = defaultSchoolFormat, session, isPublicDemoSession = false }) {
   const usingDemoData = isPublicDemoSession || (session?.source === "demo" && schoolSummary?.configured === false);
-  const demoMetrics = {
-    students: demoStudentUsage.length,
-    teachers: 1,
-    generations: generationCount || demoRecentLogs.length,
-    feedback: feedbackCount || demoPocMetrics.length,
-    reviewCandidates: demoReviewQueue.length,
-    activeStudents: demoStudentUsage.filter((student) => student.generations > 0).length,
-  };
-  const metrics = usingDemoData ? demoMetrics : schoolSummary?.metrics;
-  const reviewQueue = usingDemoData ? demoReviewQueue : safeRecordList(schoolSummary?.reviewQueue);
+  const isLocalDemoStudentProcessSupport = !isPublicDemoSession && session?.source === "demo";
+  const practicumReleasePending = !usingDemoData
+    && schoolSummary?.studentProcess?.implementationGate === "practicum_in_progress";
+  const reviewQueue = (usingDemoData ? demoReviewQueue : safeRecordList(schoolSummary?.reviewQueue))
+    .map((item) => normalizeTeacherReviewQueueItem(item));
   const recentLogs = usingDemoData ? demoRecentLogs : safeRecordList(schoolSummary?.recentLogs);
   const checkSummary = usingDemoData ? demoCheckSummary : safeRecordList(schoolSummary?.checkSummary);
   const studentUsage = usingDemoData ? demoStudentUsage : safeRecordList(schoolSummary?.studentUsage);
-  const pocMetrics = usingDemoData ? demoPocMetrics : safeRecordList(schoolSummary?.pocMetrics);
-  const exportDisabled = !enableLogExports || (metrics?.generations ?? generationCount) === 0;
-  const workloadPlan = buildTeacherWorkloadPlan(reviewQueue, metrics?.students ?? studentUsage.length);
+  const revealRosterNames = !isPublicDemoSession && session?.source !== "demo";
+  const teacherStudents = useMemo(
+    () => buildTeacherStudentSummaries(studentUsage, recentLogs, reviewQueue, { revealStudentNames: revealRosterNames }),
+    [studentUsage, recentLogs, reviewQueue, revealRosterNames],
+  );
+  const classShareThemes = useMemo(() => buildClassShareThemes(checkSummary, reviewQueue), [checkSummary, reviewQueue]);
+  const [selectedStudentId, setSelectedStudentId] = useState("");
+  const [localProcessEvents, setLocalProcessEvents] = useState([]);
+  useEffect(() => {
+    if (!isLocalDemoStudentProcessSupport) {
+      setLocalProcessEvents([]);
+      return undefined;
+    }
+    const syncLocalProcessEvents = () => {
+      setLocalProcessEvents(getSavedFeedbackRecords(STUDENT_PROCESS_EVENT_STORAGE_KEY));
+    };
+    syncLocalProcessEvents();
+    window.addEventListener("storage", syncLocalProcessEvents);
+    window.addEventListener("focus", syncLocalProcessEvents);
+    return () => {
+      window.removeEventListener("storage", syncLocalProcessEvents);
+      window.removeEventListener("focus", syncLocalProcessEvents);
+    };
+  }, [isLocalDemoStudentProcessSupport]);
+  const serverProcessEvents = safeRecordList(schoolSummary?.studentProcess?.events);
+  const processEvents = isLocalDemoStudentProcessSupport ? localProcessEvents : serverProcessEvents;
+  const studentLabelsByKey = schoolSummary?.studentProcess?.studentLabelsByKey || {};
+  const studentProcessSupportPackage = useMemo(
+    () => buildPostPracticumSupportPackage(processEvents, { ...schoolFormat, studentLabelsByKey }),
+    [processEvents, schoolFormat, studentLabelsByKey],
+  );
+  const combinedTeacherStudents = useMemo(
+    () => {
+      if (practicumReleasePending) return [];
+      return mergeTeacherStudentsWithProcessSupport(teacherStudents, studentProcessSupportPackage, {
+        includeUnmatchedProcessStudents: isLocalDemoStudentProcessSupport,
+      });
+    },
+    [teacherStudents, studentProcessSupportPackage, isLocalDemoStudentProcessSupport, practicumReleasePending],
+  );
+  const selectedStudent = combinedTeacherStudents.find((student) => student.id === selectedStudentId) || null;
+  const combinedClassShareThemes = useMemo(() => {
+    if (practicumReleasePending) return [];
+    return mergeClassShareThemes(
+      classShareThemes,
+      safeRecordList(studentProcessSupportPackage.classwideLessonBacklog).map((item) => ({
+        themeKey: item.key,
+        label: item.label,
+        count: item.studentCount,
+        studentCount: item.studentCount,
+        detail: item.avoidUse,
+      })),
+    );
+  }, [classShareThemes, studentProcessSupportPackage, practicumReleasePending]);
+  const combinedClassShareLessonPlans = useMemo(() => {
+    if (practicumReleasePending) return [];
+    const processByThemeKey = new Map(
+      safeRecordList(studentProcessSupportPackage.classwideLessonBacklog).map((item) => [item.key, item]),
+    );
+    return buildClassShareLessonPlans(combinedClassShareThemes, reviewQueue).map((plan) => {
+      const processPlan = processByThemeKey.get(plan.themeKey);
+      if (!processPlan) return plan;
+      return {
+        ...plan,
+        focusLabel: processPlan.label,
+        classQuestion: processPlan.classQuestion,
+        miniTask: processPlan.miniTask,
+        avoidText: processPlan.avoidUse,
+      };
+    });
+  }, [combinedClassShareThemes, reviewQueue, studentProcessSupportPackage, practicumReleasePending]);
+  const studentProcessUnavailable = schoolSummary?.studentProcess?.unavailable === true;
+  const studentProcessTruncated = schoolSummary?.studentProcess?.truncated === true;
+  const schoolSummaryUnavailable = !usingDemoData && !schoolSummary;
 
   return (
     <div className="view-panel">
       <div className="context-bar">
         <div>
-          <span className="context-label">確認レビュー</span>
-          <p>{session?.schoolName || "さくら保育者養成校"} の学生の振り返りを、教員が確認しやすい形に整理</p>
+          <span className="context-label">実習後支援</span>
+          <p>{session?.schoolName || "さくら保育者養成校"} の学生ごとに、記録のプロセスと支援材料を確認</p>
         </div>
-        <div className="context-stats" aria-label="確認レビューの特徴">
-          <span>教員確認ポイント</span>
-          <span>根拠確認</span>
-          <span>確認レビュー</span>
+        <div className="context-stats" aria-label="実習後支援の特徴">
+          <span>学生一覧</span>
+          <span>個人チェックポイント</span>
+          <span>授業共有論点</span>
         </div>
       </div>
 
       <div className="toolbar">
         <div>
           <span className="label">教員向け</span>
-          <h2>学生の記録を、今日の支援に変える</h2>
+          <h2>学生ごとに、実習後の支援材料を見る</h2>
         </div>
         <span className="badge">支援画面</span>
       </div>
 
       <div className="school-dashboard">
-        <TeacherSupportOverview workloadPlan={workloadPlan} reviewQueue={reviewQueue} checkSummary={checkSummary} />
-
-        <div className="school-metrics">
-          <MetricCard label="当日確認" value={`${workloadPlan.reviewNowCount}件`} detail="個別に早めに声をかけたい候補" />
-          <MetricCard label="授業共有" value={`${workloadPlan.classShareCount}件`} detail="複数学生に共通しそうな観察・表現のつまずき" />
-          <MetricCard label="学生本人" value={`${workloadPlan.lowCount}件`} detail="提出前の自己確認へ戻せる候補" />
-          <MetricCard label="直近記録" value={`${recentLogs.length || metrics?.generations || generationCount}件`} detail={session?.className || "保育実習I / 2年A組"} />
-        </div>
-
-        <TeacherActionPanel workloadPlan={workloadPlan} reviewQueueCount={reviewQueue.length} />
-
-        <section className="school-panel workload-panel">
-          <div>
-            <span className="label">教員負担の抑制</span>
-            <h3>全件確認ではなく、対応先で分ける運用</h3>
+        {schoolSummaryUnavailable && (
+          <div className="teacher-process-unavailable" role="status" aria-live="polite">
+            <strong>学校データを表示できません</strong>
+            <p>{schoolSummaryStatus || "時間をおいて再読み込みしてください。"}</p>
           </div>
-          <div className="teacher-workload-grid">
-            <article className="workload-card high">
-              <span>当日確認</span>
-              <strong>{workloadPlan.highCount}件</strong>
-              <p>個人情報・置き換え確認など、提出前に必ず見たい候補</p>
-            </article>
-            <article className="workload-card medium">
-              <span>授業共有</span>
-              <strong>{workloadPlan.mediumCount}件</strong>
-              <p>評価語・表現確認など、まとめて指導しやすい候補</p>
-            </article>
-            <article className="workload-card low">
-              <span>学生本人</span>
-              <strong>{workloadPlan.lowCount}件</strong>
-              <p>入力不足など、提出前に学生本人へ返せる候補</p>
-            </article>
-          </div>
-          <p className="muted">
-            目安として、教員が当日見る候補を{workloadPlan.reviewNowCount}件に絞ります。
-            共通テーマは授業共有へ、入力不足は学生本人への提出前の自己確認として返す運用にできます。
-          </p>
-        </section>
-
-        <section className="school-panel support-outcomes-panel">
-          <div>
-            <span className="label">支援で見る変化</span>
-            <h3>利用率より、翌日の観察と負担感を見る</h3>
-          </div>
-          <div className="poc-metrics-grid">
-            {pocMetrics.length === 0 ? (
-              demoPocMetrics.map((item) => (
-                <article key={item.label}>
-                  <span>{item.label}</span>
-                  <strong>未集計</strong>
-                  <p>{item.detail}</p>
-                </article>
-              ))
-            ) : pocMetrics.map((item) => (
-              <article key={item.label}>
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <p>{item.detail}</p>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        {!usingDemoData && (
-          <>
-            <section className="school-panel">
-              <div>
-                <span className="label">接続状況</span>
-                <h3>学校データ接続</h3>
-              </div>
-              <p className="muted">{schoolSummaryStatus || "学校データの取得状態を表示します。"}</p>
-              <div className="school-check-grid">
-                <span>{schoolSummary?.configured ? "学校データ接続中" : "接続確認中"}</span>
-                <span>{session?.roleLabel || "教員"}で利用中</span>
-                <span>{session?.schoolName || "学校未設定"}</span>
-              </div>
-            </section>
-
-            <section className="school-panel">
-              <div>
-                <span className="label">確認記録</span>
-                <h3>確認記録の書き出し</h3>
-              </div>
-              <p className="muted">{enableLogExports ? "書き出しは教員確認用の概要に絞ります。学生入力や問い返しの根拠は、必要な記録だけ画面上で確認できます。" : "学校の運用範囲が決まるまで、確認記録の書き出しは停止しています。"}</p>
-              <div className="feedback-export-actions">
-                <button className="secondary-button" type="button" onClick={onExportGenerationCsv} disabled={exportDisabled}>CSV</button>
-                <button className="secondary-button" type="button" onClick={onExportGenerationJson} disabled={exportDisabled}>JSON</button>
-              </div>
-            </section>
-          </>
         )}
-
-        <section className="school-panel">
-          <div>
-            <span className="label">確認観点</span>
-            <h3>確認観点の集計</h3>
+        {studentProcessUnavailable && (
+          <div className="teacher-process-unavailable" role="status" aria-live="polite">
+            <strong>学生の記録プロセスを一時的に取得できません</strong>
+            <p>学生一覧と既存の支援材料は表示しています。時間をおいて再読み込みしてください。</p>
           </div>
-          <div className="signal-list">
-            {checkSummary.length === 0 ? (
-              <p className="muted">まだ確認観点の集計はありません。</p>
-            ) : checkSummary.map((item) => (
-              <div className="signal-row" key={item.tag}>
-                <span>{item.tag}</span>
-                <strong>{item.count}件</strong>
-                <i style={{ width: `${Math.min(100, item.count * 18)}%` }} aria-hidden="true" />
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">学生利用</span>
-            <h3>学生別の確認記録</h3>
-          </div>
-          <div className="student-usage-list">
-            {studentUsage.length === 0 ? (
-              <p className="muted">まだ学生の確認記録はありません。</p>
-            ) : studentUsage.slice(0, 5).map((student) => (
-              <article className="student-usage-item" key={student.id}>
-                <div>
-                  <strong>{student.name || "学生"}</strong>
-                  <p>最終利用 {formatShortDate(student.latestAt)} / 学生識別は学校の運用に合わせて確認</p>
-                </div>
-                <div className="student-usage-stats">
-                  <span>日誌 {student.diary ?? 0}</span>
-                  <span>確認候補 {student.reviewCandidates ?? 0}</span>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="school-panel demo-flow-panel">
-          <div>
-            <span className="label">授業運用</span>
-            <h3>教員画面で見る順番</h3>
-          </div>
-          <div className="school-step-list">
-            <span>1. 学生が提出前に見直した記録候補を確認する</span>
-            <span>2. 当日見る候補と授業で扱う候補を分ける</span>
-            <span>3. 学生本人へ戻す問い・確認点を選ぶ</span>
-            <span>4. 学校フォーマットと保存範囲に合わせて運用を調整する</span>
-          </div>
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">確認候補</span>
-            <h3>教員の次アクション候補</h3>
-          </div>
-          <div className="review-list">
-            {reviewQueue.length === 0 ? (
-              <p className="muted">まだ確認候補はありません。</p>
-            ) : reviewQueue.map((item) => (
-              <ReviewItem
-                key={item.id}
-                title={item.title}
-                tag={item.tag}
-                detail={item.detail}
-                handlingLabel={item.handlingLabel || getReviewHandlingLabel(item)}
-                meta={item.studentName ? `${item.studentName} / ${formatShortDate(item.createdAt)}` : ""}
-              />
-            ))}
-          </div>
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">最近の記録</span>
-            <h3>最近の確認記録</h3>
-          </div>
-          {recentLogs.length === 0 ? (
-            <p className="muted">まだ教員確認用の記録はありません。学生画面で省察チェックを行うとここに表示されます。</p>
-          ) : (
-            <div className="school-log-list">
-              {recentLogs.map((log) => (
-                <article className="school-log-item" key={log.id}>
-                  <div>
-                    <strong>{getKindLabel(log.kind)}</strong>
-                    <p>{log.studentName} / {log.className || "クラス未設定"} / {formatShortDate(log.createdAt)}</p>
-                    <small>{log.inputPreview || "入力プレビューなし"}</small>
-                  </div>
-                  <span>確認{log.checkCount}件</span>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {!usingDemoData && (
-          <section className="school-panel">
-            <div>
-              <span className="label">導入機能</span>
-              <h3>学校導入で必要な機能</h3>
-            </div>
-            <div className="school-check-grid">
-              {["クラス招待", "学生別利用上限", "教員確認候補", "学校指定フォーマット", "利用規約同意", "データ保存期間設定"].map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-          </section>
         )}
+        {studentProcessTruncated && (
+          <div className="teacher-process-truncated" role="status" aria-live="polite">
+            <strong>学生データが多いため、一部のみ表示しています</strong>
+            <p>表示中の情報だけで全体傾向を断定しないでください。</p>
+          </div>
+        )}
+        {combinedTeacherStudents.length > 0 ? (
+          <TeacherStudentProcessBoard
+            students={combinedTeacherStudents}
+            selectedStudent={selectedStudent}
+            classShareThemes={combinedClassShareThemes}
+            classShareLessonPlans={combinedClassShareLessonPlans}
+            onSelectStudent={setSelectedStudentId}
+          />
+        ) : !studentProcessUnavailable && !schoolSummaryUnavailable ? (
+          <TeacherPostPracticumSupportEmptyState waitingForPracticumEnd={practicumReleasePending} />
+        ) : null}
+
       </div>
     </div>
   );
 }
 
-function TeacherSupportOverview({ workloadPlan, reviewQueue, checkSummary }) {
-  const topTheme = safeRecordList(checkSummary)[0]?.tag || "観察の具体化";
-  const lanes = [
+function getTeacherStudentCount(value) {
+  const count = Number(value) || 0;
+  return count > 0 ? count : 0;
+}
+
+function hasTeacherStudentRoute(student = {}) {
+  return getTeacherStudentCount(student.teacherCheckCount)
+    + getTeacherStudentCount(student.classShareCount)
+    + getTeacherStudentCount(student.selfCheckCount);
+}
+
+function hasTeacherStudentRecordProcess(student = {}) {
+  return getTeacherStudentCount(student.diaryCount)
+    + getTeacherStudentCount(student.generationCount)
+    + safeRecordList(student.recentLogs).length;
+}
+
+function matchesTeacherStudentRouteFilter(student = {}, filterValue = "all") {
+  if (filterValue === "teacher") return getTeacherStudentCount(student.teacherCheckCount) > 0;
+  if (filterValue === "class") return getTeacherStudentCount(student.classShareCount) > 0;
+  if (filterValue === "student") return getTeacherStudentCount(student.selfCheckCount) > 0;
+  if (filterValue === "post") return hasTeacherStudentRoute(student) === 0 && hasTeacherStudentRecordProcess(student) > 0;
+  return true;
+}
+
+function buildTeacherStudentRouteFilters(students = []) {
+  const safeStudents = safeRecordList(students);
+  return [
     {
-      label: "当日確認",
-      count: workloadPlan.reviewNowCount,
-      title: "早めに声をかける",
-      body: "個人情報、強い断定、扱いに注意が必要な表現を個別に確認します。",
+      value: "all",
+      label: "すべて",
+      detail: "全員を見る",
+      count: safeStudents.length,
     },
     {
+      value: "teacher",
+      label: "教員確認",
+      detail: "先に見る",
+      count: safeStudents.filter((student) => matchesTeacherStudentRouteFilter(student, "teacher")).length,
+    },
+    {
+      value: "class",
       label: "授業共有",
-      count: workloadPlan.classShareCount,
-      title: "クラスで扱う",
-      body: "複数学生に共通する観察・表現のつまずきを、授業の題材へ回します。",
+      detail: "授業で扱う",
+      count: safeStudents.filter((student) => matchesTeacherStudentRouteFilter(student, "class")).length,
     },
     {
-      label: "学生本人",
-      count: workloadPlan.lowCount,
-      title: "自己確認へ戻す",
-      body: "入力不足や見直しで整う候補は、提出前の確認として学生本人に返します。",
+      value: "student",
+      label: "本人確認",
+      detail: "自己確認へ戻す",
+      count: safeStudents.filter((student) => matchesTeacherStudentRouteFilter(student, "student")).length,
     },
-  ];
-  return (
-    <section className="teacher-support-overview" aria-label="教員支援の全体像">
-      <div className="teacher-support-copy">
-        <span className="label">今日の支援</span>
-        <h3>今日見る記録を、対応先で整理する</h3>
-        <p>
-          学生の記録を採点する画面ではありません。確認候補を対応先で分け、教員が声をかける、授業で扱う、学生本人に戻す判断を軽くします。
-        </p>
-        <div className="teacher-support-signal">
-          <span>確認候補 {reviewQueue.length}件</span>
-          <span>共通テーマ {topTheme}</span>
-        </div>
-      </div>
-      <div className="teacher-support-lanes">
-        {lanes.map((lane) => (
-          <article key={lane.label}>
-            <span>{lane.label}</span>
-            <strong>{lane.count}件</strong>
-            <h4>{lane.title}</h4>
-            <p>{lane.body}</p>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
+    {
+      value: "post",
+      label: "その他の実習後確認",
+      detail: "支援先未分類の記録プロセス",
+      count: safeStudents.filter((student) => matchesTeacherStudentRouteFilter(student, "post")).length,
+    },
+  ].filter((item) => item.value === "all" || item.count > 0);
 }
 
-function TeacherActionPanel({ workloadPlan, reviewQueueCount }) {
+function TeacherPostPracticumSupportEmptyState({ waitingForPracticumEnd = false }) {
   return (
-    <section className="school-panel teacher-action-panel">
-      <div className="teacher-action-head">
-        <div>
-          <span className="label">最初に見るもの</span>
-          <h3>教員が今日見る候補を絞る</h3>
-          <p>全件を読む前提ではなく、当日確認、授業共有、学生本人への返却に分けて、支援に必要な順で見ます。</p>
-        </div>
-        <strong>{workloadPlan.reviewNowCount}件</strong>
+    <section className="school-panel teacher-post-practicum-empty" aria-label="実習後支援メモの初回状態">
+      <div>
+        <span className="label">実習後支援</span>
+        <h3>{waitingForPracticumEnd ? "実習終了後に学生一覧を表示します" : "学生の記録が入ると、学生一覧を表示します"}</h3>
+        <p>{waitingForPracticumEnd
+          ? "実習期間中の記録プロセスは保持し、終了後に個人の支援ポイントと授業で扱う共通テーマへまとめます。"
+          : "学生を選ぶと個人の支援ポイントを確認でき、共通するつまずきは授業で扱うテーマにまとまります。"}</p>
       </div>
-      <div className="teacher-action-grid">
-        <article className="teacher-action-card urgent">
-          <span>当日確認</span>
-          <strong>{workloadPlan.reviewNowCount}件</strong>
-          <p>個人情報や強い断定など、早めに止めたい候補だけを見る。</p>
+      <div className="teacher-post-empty-grid">
+        <article>
+          <span>学生別</span>
+          <strong>個人のチェックポイント</strong>
+          <p>誰を先に見るか、学生本人へ何を返すかを分けます。</p>
         </article>
-        <article className="teacher-action-card class-share">
+        <article>
           <span>授業共有</span>
-          <strong>{workloadPlan.classShareCount}件</strong>
-          <p>複数学生に共通しそうな観察・表現のつまずきをまとめる。</p>
+          <strong>共通テーマ</strong>
+          <p>複数学生でつまずく欄は、個別記録ではなく授業の問いへ変換します。</p>
         </article>
-        <article className="teacher-action-card self-check">
-          <span>学生本人</span>
-          <strong>{workloadPlan.lowCount}件</strong>
-          <p>入力不足や見直しで整う候補は、提出前の自己確認へ戻す。</p>
-        </article>
-      </div>
-      <p className="teacher-action-note">確認候補全体は{reviewQueueCount}件です。教員画面の価値は、件数を増やすことではなく、確認の順番と扱いを減らすことに置きます。</p>
-    </section>
-  );
-}
-
-function MetricCard({ label, value, detail }) {
-  return (
-    <article className="metric-card">
-      <span className="label">{label}</span>
-      <strong>{value}</strong>
-      <p>{detail}</p>
-    </article>
-  );
-}
-
-function TeacherPreviewPanel({ title = "教員が確認する観点", items = teacherPreviewCheckpoints }) {
-  const safeItems = safeRecordList(items);
-  return (
-    <section className="school-panel teacher-preview-panel">
-      <div>
-        <span className="label">運用確認</span>
-        <h3>{title}</h3>
-        <p className="teacher-preview-lead">機能数ではなく、学生の省察に役立つか、教員負担が増えないか、学校フォーマットに合うかで確認します。</p>
-      </div>
-      <div className="teacher-preview-grid">
-        {safeItems.map((item) => (
-          <article key={item.title}>
-            <span>{item.kicker}</span>
-            <strong>{item.title}</strong>
-            <p>{item.detail}</p>
-          </article>
-        ))}
-      </div>
-      <div className="school-step-list" aria-label="教員が見る観点">
-        {teacherPreviewReturnItems.map((item, index) => (
-          <span key={item}>{index + 1}. {item}</span>
-        ))}
       </div>
     </section>
   );
 }
 
-function ReviewItem({ title, tag, detail, meta, handlingLabel }) {
-  return (
-    <article className="review-item">
-      <div>
-        <h4>{title}</h4>
-        <p>{detail}</p>
-        {meta && <em>{meta}</em>}
-      </div>
-      <span>{handlingLabel || tag}</span>
-    </article>
-  );
-}
+function TeacherStudentProcessBoard({ students, selectedStudent, classShareThemes, classShareLessonPlans, onSelectStudent }) {
+  const [activeStudentRouteFilter, setActiveStudentRouteFilter] = useState("all");
+  const [studentCodeQuery, setStudentCodeQuery] = useState("");
+  const studentSearchInputRef = useRef(null);
+  const studentListRef = useRef(null);
+  const studentDetailRef = useRef(null);
+  const safeStudents = safeRecordList(students);
+  const themes = safeRecordList(classShareThemes);
+  const lessonPlans = safeRecordList(classShareLessonPlans);
+  const studentRouteFilters = buildTeacherStudentRouteFilters(safeStudents);
+  const normalizedStudentRouteFilter = studentRouteFilters.some((item) => item.value === activeStudentRouteFilter)
+    ? activeStudentRouteFilter
+    : "all";
+  const normalizedStudentCodeQuery = studentCodeQuery.trim();
+  const matchesStudentCodeQuery = (student) => !normalizedStudentCodeQuery || String(student.name || "").includes(normalizedStudentCodeQuery);
+  const visibleStudents = safeStudents.filter((student) => (
+    matchesTeacherStudentRouteFilter(student, normalizedStudentRouteFilter) && matchesStudentCodeQuery(student)
+  ));
+  const effectiveSelectedStudent = selectedStudent
+    && matchesTeacherStudentRouteFilter(selectedStudent, normalizedStudentRouteFilter)
+    && matchesStudentCodeQuery(selectedStudent)
+    ? selectedStudent
+    : null;
+  const selectedProcessSteps = safeRecordList(effectiveSelectedStudent?.processSteps);
+  const selectedProgress = effectiveSelectedStudent?.processProgress || null;
+  const selectedStudentIndex = effectiveSelectedStudent ? visibleStudents.findIndex((student) => student.id === effectiveSelectedStudent.id) : -1;
+  const previousStudent = selectedStudentIndex > 0 ? visibleStudents[selectedStudentIndex - 1] : null;
+  const nextStudent = selectedStudentIndex >= 0 && selectedStudentIndex < visibleStudents.length - 1
+    ? visibleStudents[selectedStudentIndex + 1]
+    : null;
+  const selectedStudentNextStep = effectiveSelectedStudent?.supportPlan?.nextActions?.[0]
+    || effectiveSelectedStudent?.checkpoints?.[0]
+    || selectedProgress?.nextMissingLabel
+    || "個人のチェックポイントを見る";
+  const selectedStudentReturnQuestion = effectiveSelectedStudent?.supportPlan?.returnQuestions?.[0]
+    || effectiveSelectedStudent?.supportPlan?.returnPreparation?.studentPrompt
+    || effectiveSelectedStudent?.checkpoints?.[0]
+    || "次に見る場面を一つに絞れますか。";
+  const selectedStudentBoundary = effectiveSelectedStudent?.supportPlan?.returnPreparation?.boundary
+    || "本文を直すのではなく、支援前の確認観点だけを見る。";
+  const activeFilterLabel = studentRouteFilters.find((item) => item.value === normalizedStudentRouteFilter)?.label || "すべて";
+  const canOpenClassShareStudents = studentRouteFilters.some((item) => item.value === "class");
+  const classThemeSummary = themes.length > 0
+    ? `${themes.length}件 / ${themes[0].label}`
+    : "共通論点はまだありません";
+  const classLessonSummary = lessonPlans.length > 0
+    ? `${lessonPlans.length}件の授業メモ`
+    : "授業メモはまだありません";
 
-function AssignmentManagementView({ schoolSummary, schoolSummaryStatus, session }) {
-  const usingDemoData = session?.source === "demo" && schoolSummary?.configured === false;
-  const students = usingDemoData ? demoStudentUsage.length : schoolSummary?.metrics?.students ?? 0;
-  const activeStudents = usingDemoData ? demoStudentUsage.filter((student) => student.generations > 0).length : schoolSummary?.metrics?.activeStudents ?? 0;
-  const averageCompletion = Math.round(assignmentTemplates.reduce((sum, item) => sum + item.completion, 0) / assignmentTemplates.length);
-
-  return (
-    <div className="view-panel">
-      <div className="context-bar">
-        <div>
-          <span className="context-label">実習前後の課題</span>
-          <p>{session?.schoolName || "学校"} の授業内課題として、実習準備からAI利用を練習させる</p>
-        </div>
-        <div className="context-stats">
-          <span>対象学生 {students}人</span>
-          <span>利用中 {activeStudents}人</span>
-          <span>平均進捗 {averageCompletion}%</span>
-        </div>
-      </div>
-
-      <div className="toolbar">
-        <div>
-          <span className="label">課題運用</span>
-          <h2>実習準備課題</h2>
-        </div>
-        <span className="badge">授業内運用</span>
-      </div>
-
-      <div className="assignment-layout">
-        <section className="school-panel assignment-main">
-          <div>
-            <span className="label">授業課題</span>
-            <h3>配布中の課題</h3>
-          </div>
-          <div className="assignment-list">
-            {assignmentTemplates.map((assignment) => (
-              <article className="assignment-item" key={assignment.title}>
-                <div>
-                  <span>{assignment.type}</span>
-                  <h4>{assignment.title}</h4>
-                  <p>{assignment.target} / 締切: {assignment.due}</p>
-                  <div className="tag-list">
-                    {assignment.signals.map((signal) => <span key={signal}>{signal}</span>)}
-                  </div>
-                </div>
-                <div className="assignment-progress">
-                  <strong>{assignment.completion}%</strong>
-                  <i><b style={{ width: `${assignment.completion}%` }} /></i>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <section className="school-panel assignment-side">
-          <div>
-            <span className="label">確認が必要な点</span>
-            <h3>よく出る確認点</h3>
-          </div>
-          <div className="mistake-list">
-            {commonMistakes.map((mistake) => (
-              <article key={mistake.label}>
-                <strong>{mistake.count}件</strong>
-                <div>
-                  <span>{mistake.label}</span>
-                  <p>{mistake.detail}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-      </div>
-
-      <section className="school-panel">
-        <div>
-          <span className="label">課題作成</span>
-          <h3>課題作成の型</h3>
-        </div>
-        <div className="assignment-template-grid">
-          {["サンプル場面を選ぶ", "学生が事実・考察・明日の課題を書く", "AIが問い返しと安全確認を返す", "学生が見直し、必要なら実習担当教員へ相談", "教員が確認レビューの観点を見る"].map((item, index) => (
-            <span key={item}>{index + 1}. {item}</span>
-          ))}
-        </div>
-        <p className="muted">{schoolSummaryStatus || "課題の配布・締切・提出状況を学校単位で確認します。"}</p>
-      </section>
-    </div>
-  );
-}
-
-function StudentManagementView({ schoolSummary, schoolSummaryStatus, session }) {
-  const profiles = safeRecordList(schoolSummary?.profiles);
-  const students = profiles.filter((profile) => profile.role === "student");
-  const teachers = profiles.filter((profile) => profile.role !== "student");
-
-  return (
-    <div className="view-panel">
-      <div className="context-bar">
-        <div>
-          <span className="context-label">学生・クラス一覧</span>
-          <p>{session?.schoolName || "学校"} の学生、教員、クラス所属を確認</p>
-        </div>
-        <div className="context-stats">
-          <span>学生 {students.length}人</span>
-          <span>教員 {teachers.length}人</span>
-        </div>
-      </div>
-
-      <div className="toolbar">
-        <div>
-          <span className="label">利用者一覧</span>
-          <h2>利用者と権限</h2>
-        </div>
-        <span className="badge">招待設定</span>
-      </div>
-
-      <div className="school-dashboard">
-        <section className="school-panel">
-          <div>
-            <span className="label">招待方針</span>
-            <h3>学校担当者が招待する運用</h3>
-          </div>
-          <p className="muted">公開登録ではなく、学校側が学生・教員を登録し、プロフィールのroleで画面と権限を切り替えます。</p>
-          <div className="school-check-grid">
-            <span>公開登録OFF</span>
-            <span>権限分離</span>
-            <span>学校単位の閲覧制限</span>
-            <span>日次上限</span>
-          </div>
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">学生</span>
-            <h3>学生一覧</h3>
-          </div>
-          {students.length === 0 ? (
-            <p className="muted">{schoolSummaryStatus || "学生データを読み込み中です。"}</p>
-          ) : (
-            <RosterList profiles={students} />
-          )}
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">教員</span>
-            <h3>教員・管理者</h3>
-          </div>
-          {teachers.length === 0 ? <p className="muted">教員データを読み込み中です。</p> : <RosterList profiles={teachers} />}
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function RosterList({ profiles }) {
-  const safeProfiles = safeRecordList(profiles);
-  return (
-    <div className="roster-list">
-      {safeProfiles.map((profile) => (
-        <article className="roster-item" key={profile.id}>
-          <div>
-            <strong>{profile.name || profile.email}</strong>
-            <p>{profile.email}</p>
-          </div>
-          <span>{profile.roleLabel}</span>
-        </article>
-      ))}
-    </div>
-  );
-}
-
-function TeacherReviewView({ schoolSummary, schoolSummaryStatus, session }) {
-  const usingDemoData = session?.source === "demo" && schoolSummary?.configured === false;
-  const reviewQueue = usingDemoData ? demoReviewQueue : safeRecordList(schoolSummary?.reviewQueue);
-  const recentLogs = usingDemoData ? demoRecentLogs : safeRecordList(schoolSummary?.recentLogs);
-  const filters = ["すべて", ...new Set(reviewQueue.map((item) => item.tag))];
-  const priorityFilters = reviewRouteFilters;
-  const [activeFilter, setActiveFilter] = useState("すべて");
-  const [activePriority, setActivePriority] = useState("高");
-  const [selectedLogId, setSelectedLogId] = useState("");
-  const [reviewActionMap, setReviewActionMap] = useState({});
-  const workloadPlan = buildTeacherWorkloadPlan(reviewQueue);
-  const filteredQueue = reviewQueue
-    .filter((item) => activeFilter === "すべて" || item.tag === activeFilter)
-    .filter((item) => activePriority === "すべて" || getReviewPriorityLabel(item) === activePriority)
-    .slice()
-    .sort((a, b) => getReviewPriorityRank(a) - getReviewPriorityRank(b));
-  const selectedQueueItem = filteredQueue.find((item) => (item.generationId || item.id) === selectedLogId) || filteredQueue[0];
-  const selectedQueueKey = selectedQueueItem?.generationId || selectedQueueItem?.id || "";
-  const selectedLog = selectedQueueKey ? recentLogs.find((log) => log.id === selectedQueueKey) || selectedQueueItem?.log || null : null;
-  const selectedReviewAction = selectedQueueKey ? reviewActionMap[selectedQueueKey] : null;
-  const visibleQueueLabel = activePriority === "すべて"
-    ? "すべての確認候補"
-    : `${getReviewRouteLabel(activePriority)}の候補`;
-
-  function applyReviewAction(action) {
-    if (!selectedQueueKey) return;
-    setReviewActionMap((current) => ({
-      ...current,
-      [selectedQueueKey]: {
-        ...action,
-        at: new Date().toISOString(),
-      },
-    }));
-  }
-
-  return (
-    <div className="view-panel">
-      <div className="context-bar">
-        <div>
-          <span className="context-label">確認レビュー</span>
-          <p>学生の振り返りを、当日確認・授業共有・学生本人に分けて確認</p>
-        </div>
-        <div className="context-stats">
-          <span>確認待ち {reviewQueue.length}件</span>
-          <span>処理済み {Object.keys(reviewActionMap).length}件</span>
-          <span>最近 {recentLogs.length}件</span>
-        </div>
-      </div>
-
-      <div className="toolbar">
-        <div>
-          <span className="label">確認レビュー</span>
-          <h2>必要な候補だけを確認し、学生への声かけに使う</h2>
-        </div>
-        <span className="badge">{schoolSummary?.configured ? "確認記録" : "参考表示"}</span>
-      </div>
-
-      <div className="school-dashboard">
-        <section className="review-command-strip" aria-label="確認レビューの表示対象">
-          <div>
-            <span className="label">表示中の候補</span>
-            <strong>{visibleQueueLabel}</strong>
-            <p>{filteredQueue.length}件を表示中。対応先を分けて、学生への声かけや授業共有に使います。</p>
-          </div>
-          <div className="review-command-stats">
-            <span>当日確認 {workloadPlan.reviewNowCount}</span>
-            <span>授業共有 {workloadPlan.classShareCount}</span>
-            <span>学生本人 {workloadPlan.lowCount}</span>
-          </div>
-        </section>
-
-        <section className="school-panel review-control-panel">
-          <div>
-            <span className="label">絞り込み</span>
-            <h3>確認観点で絞り込み</h3>
-          </div>
-          <div className="review-load-summary" aria-label="レビュー負担の目安">
-            <span>当日確認 {workloadPlan.reviewNowCount}件</span>
-            <span>授業共有 {workloadPlan.classShareCount}件</span>
-            <span>学生本人 {workloadPlan.lowCount}件</span>
-            <span>対応先で分ける運用</span>
-          </div>
-          <div className="review-filter-stack">
-            <div>
-              <span className="review-filter-label">対応先</span>
-              <div className="review-filters" role="group" aria-label="レビュー対応先">
-                {priorityFilters.map((filter) => (
-                  <button
-                    key={filter.value}
-                    className={activePriority === filter.value ? "active" : ""}
-                    type="button"
-                    aria-pressed={activePriority === filter.value}
-                    onClick={() => setActivePriority(filter.value)}
-                  >
-                    <strong>{filter.label}</strong>
-                    <small>{filter.detail}</small>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <span className="review-filter-label">確認観点</span>
-              <div className="review-filters" role="group" aria-label="レビュー観点">
-                {filters.map((filter) => (
-                  <button
-                    key={filter}
-                    className={activeFilter === filter ? "active" : ""}
-                    type="button"
-                    aria-pressed={activeFilter === filter}
-                    onClick={() => setActiveFilter(filter)}
-                  >
-                    {filter}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <p className="review-focus-note">
-            初期表示は「当日確認」です。当日確認は個別に見る候補、授業共有はクラスで扱う候補、学生本人は提出前の自己確認へ返す候補です。
-          </p>
-          <div className="review-route-guide" aria-label="対応先の使い分け">
-            {reviewRouteGuide.map((route) => (
-              <article key={route.label}>
-                <span>{route.label}</span>
-                <strong>{route.action}</strong>
-                <p>{route.detail}</p>
-              </article>
-            ))}
-          </div>
-          <p className="muted">{schoolSummaryStatus || "通常は教員が確認するポイントを中心に扱い、必要な候補だけ根拠を確認します。学生が省察チェックを行うと、確認候補と教員確認用の記録がここに集まります。"}</p>
-        </section>
-
-        <div className="review-workspace">
-          <section className="school-panel">
-            <div>
-              <span className="label">確認一覧</span>
-              <h3>{visibleQueueLabel}</h3>
-            </div>
-            {filteredQueue.length === 0 ? (
-              <p className="muted">この観点の確認候補はありません。必要な場合だけ、対応先を授業共有・学生本人・すべてに切り替えて確認します。</p>
-            ) : (
-              <div className="review-list">
-                {filteredQueue.map((item) => (
-                  <button
-                    className="review-select-item"
-                    key={item.id}
-                    type="button"
-                    aria-pressed={selectedQueueKey === (item.generationId || item.id)}
-                    onClick={() => setSelectedLogId(item.generationId || item.id)}
-                  >
-                    <span className={`priority-chip ${getReviewPriorityClass(item)}`}>{getReviewRouteLabel(getReviewPriorityLabel(item))} / {item.tag}</span>
-                    <span className={`handling-chip ${getReviewHandlingClass(item)}`}>{getReviewHandlingLabel(item)}</span>
-                    <strong>{item.title}</strong>
-                    <p>{item.detail}</p>
-                    <small>{item.handlingDetail || getReviewHandlingDetail(item)}</small>
-                    <em>{item.studentName} / {formatShortDate(item.createdAt)}</em>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="school-panel review-detail">
-            <div>
-              <span className="label">必要時の根拠確認</span>
-              <h3>{selectedLog ? `${selectedLog.studentName}の${getKindLabel(selectedLog.kind)}` : "記録詳細"}</h3>
-            </div>
-            {!selectedLog ? (
-              <p className="muted">確認する記録を選択してください。</p>
-            ) : (
-              <div className="review-log-preview">
-                <div className="log-meta-row">
-                  <span>{formatShortDate(selectedLog.createdAt)}</span>
-                  <span>{selectedLog.className || "クラス未設定"}</span>
-                </div>
-                <div>
-                  <strong>学生入力の要点</strong>
-                  <p>{selectedLog.inputPreview || "入力プレビューなし"}</p>
-                </div>
-                <div>
-                  <strong>問い返しの根拠</strong>
-                  {(selectedLog.sections || []).slice(0, 2).map((section) => (
-                    <article key={section.heading}>
-                      <span>{section.heading}</span>
-                      <p>{section.body}</p>
-                    </article>
-                  ))}
-                  <p className="evidence-note">本文全体を読む前提ではなく、確認が必要な候補だけ要点と根拠を見ます。</p>
-                </div>
-                <div>
-                  <strong>提出前の自己確認</strong>
-                  <ul>
-                    {(selectedLog.checks || []).slice(0, 5).map((check) => (
-                      <li key={check}>{check}</li>
-                    ))}
-                  </ul>
-                </div>
-                <div className="tag-list">
-                  {(selectedLog.reviewTags || []).map((tag) => (
-                    <span key={tag}>{tag}</span>
-                  ))}
-                </div>
-                {selectedQueueItem && (
-                  <div className="review-action-panel">
-                    <strong>教員の軽い対応</strong>
-                    <p>実習期間中は長文添削ではなく、必要なものだけ状態を付けて、学生への再確認や授業共有に回します。</p>
-                    <div className="review-action-buttons" role="group" aria-label="レビュー対応">
-                      {reviewActions.map((action) => (
-                        <button
-                          key={action.id}
-                          className={selectedReviewAction?.id === action.id ? "active" : ""}
-                          type="button"
-                          aria-pressed={selectedReviewAction?.id === action.id}
-                          onClick={() => applyReviewAction(action)}
-                        >
-                          {action.label}
-                        </button>
-                      ))}
-                    </div>
-                    {selectedReviewAction && (
-                      <div className="review-action-result">
-                        <span>{selectedReviewAction.label}</span>
-                        <p>{selectedReviewAction.template}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-        </div>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">運用フロー</span>
-            <h3>確認候補の扱い</h3>
-          </div>
-          <div className="school-step-list">
-            {["個人情報・要配慮情報は当日確認", "共通テーマは授業共有へ", "入力不足は学生本人の提出前の自己確認へ", "教員が確認するポイントとして扱う"].map((item, index) => (
-              <span key={item}>{index + 1}. {item}</span>
-            ))}
-          </div>
-        </section>
-      </div>
-    </div>
-  );
-}
-
-function FormatSettingsView({ session }) {
-  const [template, setTemplate] = useState(defaultSchoolFormat);
-  const [formatStatus, setFormatStatus] = useState("学校フォーマットを読み込んでいます。");
-  const [saving, setSaving] = useState(false);
-  const [schemaReady, setSchemaReady] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadTemplate() {
-      setFormatStatus("学校フォーマットを読み込んでいます。");
-      try {
-        const response = await fetch("/api/school/templates", { cache: "no-store" });
-        const body = await response.json();
-        if (!response.ok) {
-          throw new Error(body.error || "学校フォーマットを取得できませんでした。");
-        }
-        if (!cancelled) {
-          setTemplate(normalizeClientTemplate(body.template));
-          setSchemaReady(body.schemaReady !== false);
-          setFormatStatus(body.schemaReady === false ? body.error || body.message || "標準フォーマットを表示しています。" : "学校フォーマットを問い返しに反映できます。");
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setTemplate(defaultSchoolFormat);
-          setSchemaReady(false);
-          setFormatStatus(error.message);
-        }
-      }
-    }
-
-    loadTemplate();
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.schoolId]);
-
-  function updateHeading(kind, index, value) {
-    setTemplate((current) => {
-      const next = [...current[kind]];
-      next[index] = value;
-      return { ...current, [kind]: next };
+  function focusTeacherStudentList() {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(() => {
+      const list = studentListRef.current;
+      if (!list) return;
+      const targetTop = Math.max(0, list.getBoundingClientRect().top + window.scrollY - 12);
+      window.scrollTo({ top: targetTop, behavior: "auto" });
+      list.focus({ preventScroll: true });
     });
   }
 
-  function updateRules(value) {
-    const rules = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-    setTemplate((current) => ({ ...current, checkRules: rules }));
+  function focusTeacherStudentDetail() {
+    const detail = studentDetailRef.current;
+    if (!detail) return;
+    const targetTop = Math.max(0, detail.getBoundingClientRect().top + window.scrollY - 12);
+    window.scrollTo({ top: targetTop, behavior: "auto" });
+    detail.focus({ preventScroll: true });
   }
 
-  function resetDefaults() {
-    setTemplate(defaultSchoolFormat);
-    setFormatStatus("標準フォーマットに戻しました。保存すると学校設定に反映されます。");
+  useEffect(() => {
+    if (!effectiveSelectedStudent?.id) return undefined;
+    const frame = window.requestAnimationFrame(focusTeacherStudentDetail);
+    return () => window.cancelAnimationFrame(frame);
+  }, [effectiveSelectedStudent?.id]);
+
+  function handleTeacherStudentSelect(studentId) {
+    if (effectiveSelectedStudent?.id === studentId) {
+      window.requestAnimationFrame(focusTeacherStudentDetail);
+      return;
+    }
+    onSelectStudent(studentId);
   }
 
-  async function saveTemplate(event) {
-    event.preventDefault();
-    setSaving(true);
-    setFormatStatus("学校フォーマットを保存しています。");
-    try {
-      const response = await fetch("/api/school/templates", {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ template }),
-      });
-      const body = await response.json();
-      if (!response.ok) {
-        throw new Error(body.error || "学校フォーマットを保存できませんでした。");
-      }
-      setTemplate(normalizeClientTemplate(body.template));
-      setSchemaReady(true);
-      setFormatStatus("保存しました。次回の問い返しからこの見出し・確認観点を反映します。");
-    } catch (error) {
-      setSchemaReady(false);
-      setFormatStatus(error.message);
-    } finally {
-      setSaving(false);
+  function handleStudentRouteFilterChange(nextFilter, options = {}) {
+    setActiveStudentRouteFilter(nextFilter);
+    if (selectedStudent && !matchesTeacherStudentRouteFilter(selectedStudent, nextFilter)) {
+      onSelectStudent("");
+    }
+    if (options.focusList) focusTeacherStudentList();
+  }
+
+  function handleStudentCodeSearchChange(nextQuery) {
+    setStudentCodeQuery(nextQuery);
+    const normalizedNextQuery = nextQuery.trim();
+    if (selectedStudent && normalizedNextQuery && !String(selectedStudent.name || "").includes(normalizedNextQuery)) {
+      onSelectStudent("");
     }
   }
 
+  function clearStudentSearch() {
+    handleStudentCodeSearchChange("");
+    window.requestAnimationFrame(() => studentSearchInputRef.current?.focus());
+  }
+
   return (
-    <div className="view-panel">
-      <div className="context-bar">
+    <section className="school-panel teacher-student-process-board" aria-label="学生別の支援確認">
+      <div className="teacher-student-board-head">
         <div>
-          <span className="context-label">学校フォーマット設定</span>
-          <p>{session?.schoolName || "学校"} の実習日誌の提出様式に合わせ、学生への問い返しへ反映します。</p>
+          <span className="label">学生別確認</span>
+          <h3>学生一覧から、個人のチェックポイントを見る</h3>
+          <p>実習後に、提出前チェックの残り、相談点、授業で扱う共通テーマを学生別に見返すための画面です。</p>
         </div>
-        <div className="context-stats">
-          <span>日誌</span>
-          <span>チェック項目</span>
+        <span>{safeStudents.length}人</span>
+      </div>
+
+      <div className="teacher-student-filter-panel" aria-label="学生一覧の絞り込み">
+        <div>
+          <span className="review-filter-label">支援先で絞る</span>
+          <p>{activeFilterLabel} {visibleStudents.length}人を表示中。必要な時だけ、支援先で絞り込みます。</p>
+        </div>
+        <div className="teacher-student-route-filters" role="group" aria-label="学生一覧の支援先">
+          {studentRouteFilters.map((filter) => (
+            <button
+              key={filter.value}
+              type="button"
+              className={normalizedStudentRouteFilter === filter.value ? "active" : ""}
+              aria-pressed={normalizedStudentRouteFilter === filter.value}
+              onClick={() => handleStudentRouteFilterChange(filter.value)}
+            >
+              <strong>{filter.label}</strong>
+              <small>{filter.count}人 / {filter.detail}</small>
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="toolbar">
-        <div>
-          <span className="label">フォーマット</span>
-          <h2>提出様式の設定</h2>
-        </div>
-        <span className="badge">{schemaReady ? "保存対応" : "標準設定"}</span>
+      <div className="teacher-student-search">
+        <label htmlFor="teacher-student-code-search">
+          <span className="review-filter-label">学生を検索</span>
+          <input
+            ref={studentSearchInputRef}
+            id="teacher-student-code-search"
+            type="search"
+            value={studentCodeQuery}
+            placeholder="表示中の名前・コード"
+            autoComplete="off"
+            onChange={(event) => handleStudentCodeSearchChange(event.target.value)}
+          />
+        </label>
+        {studentCodeQuery && (
+          <button type="button" onClick={clearStudentSearch}>検索解除</button>
+        )}
+        <p className="teacher-student-search-status" aria-live="polite">
+          検索結果 {visibleStudents.length}人
+        </p>
       </div>
 
-      <form className="school-dashboard" onSubmit={saveTemplate}>
-        <section className="school-panel format-status-panel">
-          <div>
-            <span className="label">設定状況</span>
-            <h3>問い返しへの反映状態</h3>
-          </div>
-          <p className="muted">{formatStatus}</p>
-        </section>
-
-        <TeacherPreviewPanel title="学校フォーマット確認の観点" items={formatReviewQuestions} />
-
-        <section className="school-panel format-safety-panel">
-          <div>
-            <span className="label">受領前の注意</span>
-            <h3>空欄フォーマットか見出しだけを扱う</h3>
-          </div>
-          <p className="muted">
-            記入済み日誌、実名、園名、診断名、家庭事情は入れず、欄名・順番・提出前の自己確認観点だけを確認します。
-          </p>
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">日誌フォーマット</span>
-            <h3>実習日誌テンプレート</h3>
-          </div>
-          <div className="template-field-list">
-            {template.diaryHeadings.map((item, index) => (
-              <label key={`diary-${index}`}>
-                {index + 1}番目の見出し
-                <input value={item} maxLength={18} onChange={(event) => updateHeading("diaryHeadings", index, event.target.value)} />
-              </label>
-            ))}
-          </div>
-        </section>
-
-        <section className="school-panel">
-          <div>
-            <span className="label">学校ルール</span>
-            <h3>学校ごとの確認ルール</h3>
-          </div>
-          <label>
-            提出前の自己確認に反映する観点
-            <textarea className="compact-textarea" value={template.checkRules.join("\n")} rows={5} onChange={(event) => updateRules(event.target.value)} />
-          </label>
-          <label>
-            文体・提出ルール
-            <textarea className="compact-textarea" value={template.writingStyle} maxLength={600} rows={5} onChange={(event) => setTemplate((current) => ({ ...current, writingStyle: event.target.value }))} />
-          </label>
-          <div className="school-check-grid">
-            {template.checkRules.slice(0, 8).map((item) => (
-              <span key={item}>{item}</span>
-            ))}
-          </div>
-        </section>
-
-        <div className="format-actions">
-          <button className="primary-button" type="submit" disabled={saving}>{saving ? "保存中..." : "学校フォーマットを保存"}</button>
-          <button className="secondary-button" type="button" onClick={resetDefaults} disabled={saving}>標準に戻す</button>
+      <div className="teacher-student-board-grid">
+        <div
+          ref={studentListRef}
+          className="teacher-student-list"
+          id="teacher-student-list"
+          role="region"
+          aria-label="学生一覧"
+          tabIndex={-1}
+        >
+          {visibleStudents.length === 0 ? (
+            <p className="teacher-empty-note">検索条件と支援先に該当する学生はいません。</p>
+          ) : visibleStudents.map((student) => (
+            <button
+              key={student.id}
+              type="button"
+              className={effectiveSelectedStudent?.id === student.id ? "active" : ""}
+              aria-pressed={effectiveSelectedStudent?.id === student.id}
+              aria-controls="teacher-student-detail"
+              onClick={() => handleTeacherStudentSelect(student.id)}
+            >
+              <strong>{student.name}</strong>
+              <span>{student.className || "クラス未設定"}</span>
+              <small>{student.supportPlan?.label || "実習後の支援材料"}</small>
+              {student.processSupport?.processDate && (
+                <em className="teacher-student-next-reason">
+                  最新日誌日 {student.processSupport.processDate} / {student.processSupport.processDateCount || 1}日分
+                </em>
+              )}
+              {student.nextCheckReason && (
+                <em className="teacher-student-next-reason">次に見る: {student.nextCheckReason}</em>
+              )}
+            </button>
+          ))}
         </div>
-      </form>
-    </div>
+
+        <div
+          ref={studentDetailRef}
+          className="teacher-student-detail"
+          id="teacher-student-detail"
+          role="region"
+          aria-label="選択学生の個人チェックポイント"
+          tabIndex={-1}
+        >
+          {!effectiveSelectedStudent ? (
+            <div className="teacher-empty-detail-card">
+              <span className="label">個人チェックポイント</span>
+              <strong>学生を選択すると、個人の確認材料を表示します</strong>
+              <p>記録プロセス、提出前確認、翌日の観察につながる欄、学生へ返す問いをここで確認します。</p>
+            </div>
+          ) : (
+            <>
+              <div className="teacher-student-detail-head">
+                <div>
+                  <span className="label">個人チェックポイント</span>
+                  <h4>{effectiveSelectedStudent.name}</h4>
+                  <p>{effectiveSelectedStudent.className || "クラス未設定"}</p>
+                  {effectiveSelectedStudent.processSupport?.processDate && (
+                    <p>最新日誌日 {effectiveSelectedStudent.processSupport.processDate} / {effectiveSelectedStudent.processSupport.processDateCount || 1}日分</p>
+                  )}
+                  {selectedProgress && (
+                    <p className="teacher-process-summary">
+                      次に見る観点: {selectedProgress.nextMissingLabel}
+                    </p>
+                  )}
+                </div>
+                <div className="teacher-student-route-counts" aria-label="対応先別件数">
+                  <span>教員確認 {effectiveSelectedStudent.teacherCheckCount}</span>
+                  <span>授業共有 {effectiveSelectedStudent.classShareCount}</span>
+                  <span>本人確認 {effectiveSelectedStudent.selfCheckCount}</span>
+                </div>
+              </div>
+
+              <div className="teacher-student-selection-strip" aria-label="選択中の学生">
+                <div>
+                  <span>選択中</span>
+                  <strong>{effectiveSelectedStudent.name}</strong>
+                  <p>次に見る: {selectedStudentNextStep}</p>
+                </div>
+                <div className="teacher-detail-nav-actions">
+                  <button
+                    type="button"
+                    disabled={!previousStudent}
+                    onClick={() => previousStudent && handleTeacherStudentSelect(previousStudent.id)}
+                  >
+                    前の学生
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!nextStudent}
+                    onClick={() => nextStudent && handleTeacherStudentSelect(nextStudent.id)}
+                  >
+                    次の学生
+                  </button>
+                  <a className="teacher-detail-nav-link" href="#teacher-student-list">一覧へ戻る</a>
+                </div>
+              </div>
+
+              <div className="teacher-student-action-brief" aria-label="選択学生の最初に見ること">
+                <article>
+                  <span>先に見る</span>
+                  <strong>{selectedStudentNextStep}</strong>
+                </article>
+                <article>
+                  <span>返す問い</span>
+                  <strong>{selectedStudentReturnQuestion}</strong>
+                </article>
+                <article>
+                  <span>扱う境界</span>
+                  <strong>{selectedStudentBoundary}</strong>
+                </article>
+              </div>
+
+              <div className="teacher-checkpoint-list">
+                {effectiveSelectedStudent.checkpoints.map((checkpoint) => (
+                  <article key={checkpoint}>
+                    <span>確認</span>
+                    <p>{checkpoint}</p>
+                  </article>
+                ))}
+              </div>
+
+              <details className="teacher-student-support-details">
+                <summary>
+                  <span>
+                    <span className="label">補助材料</span>
+                    <strong>記録プロセス・返却準備・直近記録を開く</strong>
+                  </span>
+                  <em>必要な時だけ確認</em>
+                </summary>
+                <div className="teacher-student-support-details-body">
+                  <div className="teacher-process-timeline" aria-label="記録プロセス">
+                    {selectedProcessSteps.map((step) => (
+                      <article key={step.label} className={`process-${step.status || "neutral"}`}>
+                        <span>{step.label}</span>
+                        <strong>{step.value}</strong>
+                        <p>{step.body}</p>
+                      </article>
+                    ))}
+                  </div>
+
+                  {effectiveSelectedStudent.supportPlan && (
+                    <section className={`teacher-support-plan tone-${effectiveSelectedStudent.supportPlan.tone || "neutral"}`} aria-label="選択学生の支援メモ">
+                      <div className="teacher-support-plan-head">
+                        <span>{effectiveSelectedStudent.supportPlan.label}</span>
+                        <div>
+                          <strong>{effectiveSelectedStudent.supportPlan.title}</strong>
+                          <p>{effectiveSelectedStudent.supportPlan.body}</p>
+                        </div>
+                      </div>
+                      <div className="teacher-support-plan-grid">
+                        <article>
+                          <span>次に見ること</span>
+                          <ul>
+                            {effectiveSelectedStudent.supportPlan.nextActions.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                        <article>
+                          <span>返す問い</span>
+                          <ul>
+                            {effectiveSelectedStudent.supportPlan.returnQuestions.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                      </div>
+                      {effectiveSelectedStudent.supportPlan.returnPreparation && (
+                        <div className="teacher-return-prep teacher-student-return-prep" aria-label="返す前の下ごしらえ">
+                          <div className="teacher-student-return-prep-head">
+                            <span>{effectiveSelectedStudent.supportPlan.returnPreparation.route}</span>
+                            <strong>返す前の下ごしらえ</strong>
+                            <p>{effectiveSelectedStudent.supportPlan.returnPreparation.focus}</p>
+                          </div>
+                          <dl>
+                            <div>
+                              <dt>返す前に見る</dt>
+                              <dd>{effectiveSelectedStudent.supportPlan.returnPreparation.teacherCheck}</dd>
+                            </div>
+                            <div>
+                              <dt>学生へ返す問い</dt>
+                              <dd>{effectiveSelectedStudent.supportPlan.returnPreparation.studentPrompt}</dd>
+                            </div>
+                            <div>
+                              <dt>授業に回すなら</dt>
+                              <dd>{effectiveSelectedStudent.supportPlan.returnPreparation.classUse}</dd>
+                            </div>
+                            <div>
+                              <dt>扱わないこと</dt>
+                              <dd>{effectiveSelectedStudent.supportPlan.returnPreparation.boundary}</dd>
+                            </div>
+                          </dl>
+                        </div>
+                      )}
+                    </section>
+                  )}
+
+                  <div className="teacher-recent-records">
+                    <span className="label">直近の記録</span>
+                    {effectiveSelectedStudent.recentLogs.length === 0 ? (
+                      <p className="teacher-empty-note">最近の記録はまだありません。</p>
+                    ) : effectiveSelectedStudent.recentLogs.slice(0, 2).map((log) => (
+                      <article key={log.id}>
+                        <strong>{getKindLabel(log.kind)} / {formatShortDate(log.createdAt)}</strong>
+                        <p>{log.displaySummary || "確認メタ情報なし"}</p>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              </details>
+            </>
+          )}
+        </div>
+      </div>
+
+      <details className="teacher-class-theme-strip" aria-label="授業で扱う共通論点">
+        <summary className="teacher-class-theme-summary">
+          <div>
+            <span className="label">授業共有論点</span>
+            <h4>複数学生でつまずきやすい点を別に残す</h4>
+            <p>{classThemeSummary}</p>
+          </div>
+          <span>{classLessonSummary}</span>
+        </summary>
+        <div>
+          <span className="label">授業共有論点</span>
+          <p>必要な時だけ開き、個別記録ではなく授業で扱う問いとして確認します。</p>
+        </div>
+        <div className="teacher-class-theme-grid">
+          {themes.length === 0 ? (
+            <p className="teacher-empty-note">授業で扱う共通論点はまだありません。</p>
+          ) : themes.map((theme) => (
+            <article key={theme.themeKey || theme.label}>
+              <span>{theme.studentCount}名 / {theme.count}件</span>
+              <strong>{theme.label}</strong>
+              <p>{theme.detail}</p>
+            </article>
+          ))}
+        </div>
+        {lessonPlans.length > 0 && (
+          <div className="teacher-class-lesson-plan" aria-label="次回授業で扱う問い">
+            <div className="teacher-class-lesson-head">
+              <div>
+                <span className="label">授業メモ</span>
+                <p>個別の記録を取り上げず、次回授業で扱う問いに変換します。</p>
+              </div>
+              {canOpenClassShareStudents && (
+                <button type="button" onClick={() => handleStudentRouteFilterChange("class", { focusList: true })}>
+                  授業共有の学生を見る
+                </button>
+              )}
+            </div>
+            <div className="teacher-class-lesson-grid">
+              {lessonPlans.map((plan) => (
+                <article key={plan.id}>
+                  <span>{plan.studentCount}名 / {plan.focusLabel}</span>
+                  <strong>{plan.label}</strong>
+                  <p>{plan.classQuestion}</p>
+                  <ul>
+                    <li>{plan.miniTask}</li>
+                    <li>{plan.avoidText}</li>
+                  </ul>
+                </article>
+              ))}
+            </div>
+          </div>
+        )}
+      </details>
+
+    </section>
   );
 }
 
@@ -3976,9 +5257,22 @@ function normalizeClientTemplate(template = {}) {
     : [];
   return {
     diaryHeadings: normalizeClientList(template.diaryHeadings, defaultSchoolFormat.diaryHeadings, 5),
+    studentDiaryFieldLabels: normalizeClientStudentDiaryFieldLabels(template.studentDiaryFieldLabels || template.diaryFieldLabels),
+    studentDiaryRequirements: buildStudentDiaryRequirements(template),
     planHeadings: normalizeClientList(template.planHeadings, defaultSchoolFormat.planHeadings, 5),
     checkRules: rules.length >= 3 ? rules : defaultSchoolFormat.checkRules,
     writingStyle: typeof template.writingStyle === "string" && template.writingStyle.trim() ? template.writingStyle : defaultSchoolFormat.writingStyle,
+  };
+}
+
+function normalizeClientStudentDiaryFieldLabels(value = {}) {
+  const labels = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return {
+    goalReflection: safeCopyText(labels.goalReflection, 80) || defaultSchoolFormat.studentDiaryFieldLabels.goalReflection,
+    episodeMemo: safeCopyText(labels.episodeMemo, 80) || defaultSchoolFormat.studentDiaryFieldLabels.episodeMemo,
+    episodeInsight: safeCopyText(labels.episodeInsight, 80) || defaultSchoolFormat.studentDiaryFieldLabels.episodeInsight,
+    overallLearning: safeCopyText(labels.overallLearning, 80) || defaultSchoolFormat.studentDiaryFieldLabels.overallLearning,
+    nextAction: safeCopyText(labels.nextAction, 80) || defaultSchoolFormat.studentDiaryFieldLabels.nextAction,
   };
 }
 
@@ -3988,72 +5282,6 @@ function normalizeClientList(value, fallback, count) {
     const item = typeof list[index] === "string" ? list[index].trim() : "";
     return item || fallback[index] || "";
   });
-}
-
-function getKindLabel(kind) {
-  if (kind === "plan") return "指導案";
-  return "日誌";
-}
-
-function buildTeacherWorkloadPlan(reviewQueue = [], studentCount = 0) {
-  const counts = safeRecordList(reviewQueue).reduce((acc, item) => {
-    acc[getReviewPriorityLabel(item)] += 1;
-    return acc;
-  }, { 高: 0, 中: 0, 低: 0 });
-  return {
-    highCount: counts.高,
-    mediumCount: counts.中,
-    lowCount: counts.低,
-    reviewNowCount: counts.高,
-    classShareCount: counts.中,
-    studentSelfCheckCount: counts.低,
-    studentCount,
-  };
-}
-
-function getReviewRouteLabel(priority) {
-  return reviewRouteFilters.find((filter) => filter.value === priority)?.label || "学生本人";
-}
-
-function getReviewPriorityLabel(item = {}) {
-  if (["高", "中", "低"].includes(item.priority)) return item.priority;
-  const text = `${item.tag || ""} ${item.title || ""} ${item.detail || ""}`;
-  if (/個人情報|匿名化|置換確認|実名|園名|診断|家庭|補完疑い|入力外情報/.test(text)) return "高";
-  if (/表現|評価|安全|指針|5領域|五領域|考察|感想/.test(text)) return "中";
-  return "低";
-}
-
-function getReviewPriorityRank(item) {
-  return { 高: 0, 中: 1, 低: 2 }[getReviewPriorityLabel(item)] ?? 3;
-}
-
-function getReviewPriorityClass(item) {
-  const label = getReviewPriorityLabel(item);
-  if (label === "高") return "priority-high";
-  if (label === "中") return "priority-medium";
-  return "priority-low";
-}
-
-function getReviewHandlingLabel(item = {}) {
-  if (item.handlingLabel) return item.handlingLabel;
-  const priority = getReviewPriorityLabel(item);
-  if (priority === "高") return "当日確認";
-  if (priority === "中") return "授業共有";
-  return "学生本人";
-}
-
-function getReviewHandlingClass(item = {}) {
-  const handling = item.handling || "";
-  if (handling === "teacher_now" || getReviewPriorityLabel(item) === "高") return "handling-teacher";
-  if (handling === "class_share" || getReviewPriorityLabel(item) === "中") return "handling-class";
-  return "handling-student";
-}
-
-function getReviewHandlingDetail(item = {}) {
-  const priority = getReviewPriorityLabel(item);
-  if (priority === "高") return "個人情報や重大な表現リスクとして、当日中に教員が見る候補です。";
-  if (priority === "中") return "個別添削ではなく、授業共有で扱い、学生本人への問いにも返せる候補です。";
-  return "教員の個別確認ではなく、学生本人への提出前の自己確認で返す候補です。";
 }
 
 function formatShortDate(value) {
@@ -4066,52 +5294,4 @@ function formatShortDate(value) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
-}
-
-function SchoolPlanView({ hasPracticePass, onActivate }) {
-  return (
-    <div className="view-panel">
-      <div className="context-bar">
-        <div>
-          <span className="context-label">学校導入プラン</span>
-          <p>実習準備授業から実習後の振り返りまで、学科・学校単位で提供</p>
-        </div>
-        <div className="context-stats" aria-label="料金の特徴">
-          <span>半期利用</span>
-          <span>学科契約</span>
-          <span>学校契約</span>
-        </div>
-      </div>
-
-      <div className="toolbar">
-        <div>
-          <span className="label">導入プラン</span>
-          <h2>導入プラン</h2>
-        </div>
-        <span className="badge">{hasPracticePass ? "学校導入モード有効" : "未設定"}</span>
-      </div>
-
-      <div className="pricing-grid">
-        <PriceCard label="検証導入" title="実習科目パイロット" price="個別相談" items={["半期の実習準備授業", "学生画面", "課題運用", "導入後ヒアリング"]} />
-        <PriceCard featured label="推奨" title="学科導入" price="お見積り" items={["複数クラス", "教員確認画面", "課題・確認候補", "学校指定フォーマット"]}>
-          <button className="primary-button" type="button" onClick={onActivate}>学科導入モードを確認</button>
-        </PriceCard>
-        <PriceCard label="学校導入" title="学校・法人向け" price="個別見積" items={["複数学科", "SSO連携", "研修資料", "AI利用規程・同意文面支援"]} />
-      </div>
-    </div>
-  );
-}
-
-function PriceCard({ label, title, price, items, featured = false, children }) {
-  return (
-    <article className={`price-card ${featured ? "featured" : ""}`}>
-      <span className="label">{label}</span>
-      <h3>{title}</h3>
-      <strong>{price}</strong>
-      <ul>
-        {items.map((item) => <li key={item}>{item}</li>)}
-      </ul>
-      {children}
-    </article>
-  );
 }

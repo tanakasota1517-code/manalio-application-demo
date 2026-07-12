@@ -1,5 +1,6 @@
 import { CONTACT_EMAIL } from "./site-config";
 import hoikushiSummary from "../data/hoikushi-benchmark-summary.json";
+import MobilePublicNav from "./mobile-public-nav";
 
 export const metadata = {
   alternates: {
@@ -70,7 +71,7 @@ const feedbackLoopSteps = [
   {
     label: "02",
     title: "翌日に見る観点へ変える",
-    body: "AIは完成文ではなく、明日見る子どもの姿、保育者の関わり、自分の関わり方を確認する問いとして返します。",
+    body: "AIは、明日見る子どもの姿、保育者の関わり、自分の関わり方を確認する問いとして返します。",
   },
   {
     label: "03",
@@ -96,12 +97,12 @@ const governanceItems = [
 const positioningCards = [
   {
     label: "保育施設向けAI",
-    title: "hinary・ホイット・保育AIノート等",
+    title: "園内文書・計画作成の支援",
     body: "現場職員の連絡帳、指導計画、要録、園内文書などの業務支援が中心です。",
   },
   {
     label: "園向けICT",
-    title: "パステルApps・はいチーズ！等",
+    title: "園務・保護者連絡の支援",
     body: "園の帳票作成、保育日誌、保護者連絡、運営管理などを効率化します。",
   },
   {
@@ -145,9 +146,9 @@ const caseSteps = [
 
 const teacherTriageItems = [
   {
-    label: "当日確認",
-    title: "早めに止めたい候補だけ見る",
-    body: "個人情報、強い断定、実習先との関係に影響しそうな表現を先に確認します。",
+    label: "教員確認",
+    title: "学校教員が確認する候補だけ見る",
+    body: "個人情報、強い断定、実習先との関係に影響しそうな表現を提出後確認へ回します。",
     tone: "urgent",
   },
   {
@@ -202,12 +203,25 @@ const faqItems = [
   },
   {
     question: "教員の確認作業が増えすぎる心配はありませんか。",
-    answer: "全件を細かく添削する前提ではなく、個人情報・評価的表現・入力不足などを必要な範囲で整理します。高優先だけを当日確認、中優先は授業内共有、低優先は学生本人への自己確認として返す運用を想定しています。",
+    answer: "全件を細かく添削する前提ではなく、個人情報・評価的表現・入力不足などを必要な範囲で整理します。学校教員が確認する候補、授業で共有する候補、学生本人への自己確認として返す候補に分ける運用を想定しています。",
   },
   {
     question: "一般AIや学校の自前運用と何が違いますか。",
     answer: "生成AIそのものは学校でも使えます。ただ、学生が個人情報を入れない仕組み、送信前の確認・置換、代筆化を防ぐ問い返し設計、学生・教員の権限分離、利用量と費用の管理、すり抜け時の事故対応まで含めると、単なるチャット利用とは運用負担が異なります。Manalioはこの部分を保育実習に絞って用意します。",
   },
+];
+
+const publicNavItems = [
+  ["Manalioとは", "#about"],
+  ["支援フロー", "#loop"],
+  ["機能", "/product"],
+  ["導入メリット", "#value"],
+  ["違い", "#positioning"],
+  ["信頼性検証", "#evidence"],
+  ["導入の流れ", "/pilot"],
+  ["安全性への取り組み", "/governance"],
+  ["導入イメージ", "#case"],
+  ["FAQ", "#faq"],
 ];
 
 export default function Home() {
@@ -237,17 +251,9 @@ export default function Home() {
           </span>
         </a>
         <nav className="manalio-nav" aria-label="公開サイト">
-          <a href="#about">Manalioとは</a>
-          <a href="#loop">支援フロー</a>
-          <a href="/product">機能</a>
-          <a href="#value">導入メリット</a>
-          <a href="#positioning">違い</a>
-          <a href="#evidence">信頼性検証</a>
-          <a href="/pilot">導入の流れ</a>
-          <a href="/governance">安全性への取り組み</a>
-          <a href="#case">導入イメージ</a>
-          <a href="#faq">FAQ</a>
+          {publicNavItems.map(([label, href]) => <a href={href} key={href}>{label}</a>)}
         </nav>
+        <MobilePublicNav items={publicNavItems} />
         <div className="manalio-header-actions">
           <a className="manalio-button ghost" href="/app">サービス画面を見る</a>
           <a className="manalio-button primary" href="#contact">導入相談をする</a>
@@ -265,10 +271,10 @@ export default function Home() {
             <span>実習先で受けた指導の振り返りに、</span>
             <span>問い返し・自己確認・翌日の観察視点を返します。</span>
           </p>
-          <p className="manalio-tagline">観察を、記録に。記録を、学びに。</p>
+          <p className="manalio-tagline">観察を記録に。記録を学びに。</p>
           <div className="manalio-cta-row">
             <a className="manalio-button primary large" href="#contact">導入相談をする</a>
-            <a className="manalio-button ghost large" href={contactHref}>資料請求する</a>
+            <a className="manalio-button ghost large" href="/app">サービス画面を見る</a>
           </div>
           <div className="manalio-trust-badge" aria-label="サービスの方針">
             <strong>教育現場に配慮した安心設計</strong>
@@ -312,12 +318,12 @@ export default function Home() {
                 </section>
               </article>
               <article className="manalio-work-card checks">
-                <h2>教員が確認する観点</h2>
+                <h2>教員が見る支援材料</h2>
                 <ul>
-                  <li>個人情報が含まれていないか</li>
-                  <li>入力内容から確認できない事実が含まれていないか</li>
-                  <li>子どもを評価する表現になっていないか</li>
-                  <li>教員が確認したい問いがあるか</li>
+                  <li>学生別の支援ポイント</li>
+                  <li>実習中にどう見直したかの要点</li>
+                  <li>学生本人へ返す問い</li>
+                  <li>授業で扱う共通テーマ</li>
                 </ul>
                 <img className="manalio-line-illust teacher" src="/images/manalio-illust-teacher-checking.png" alt="" aria-hidden="true" width="520" height="346" decoding="async" />
               </article>
@@ -331,8 +337,8 @@ export default function Home() {
 
       <section className="manalio-section manalio-why" id="about">
         <div className="manalio-section-head center">
-          <h2>なぜ今、必要とされているのか</h2>
-          <p>実習指導の現場では、学生・教員・学校それぞれに課題があります。</p>
+          <h2>Manalioは、学生の省察と教員の支援をつなぐ実習支援サービスです。</h2>
+          <p>学生が記録を学びへ変える過程と、教員が確認する支援上の論点を同じ流れで扱います。</p>
         </div>
         <div className="manalio-issue-grid">
           {issueCards.map((card) => (
@@ -369,7 +375,7 @@ export default function Home() {
       <section className="manalio-section manalio-value" id="value">
         <div className="manalio-value-copy">
           <p className="manalio-kicker">Manalioが実現すること</p>
-          <h2>学生の学びを深め、教員の確認負担を軽くする。</h2>
+          <h2>学生の記録を整理し、教員が支援すべき論点を見つけやすくする。</h2>
           <div className="manalio-promise-list">
             {promiseCards.map((card) => (
               <article key={card.title}>
@@ -390,9 +396,9 @@ export default function Home() {
             <h3>教員画面でできること</h3>
             <ul>
               <li>学生の振り返り状況を必要範囲で確認</li>
-              <li>当日見る候補を高優先だけに絞り込み</li>
+              <li>提出後に確認する候補を高優先だけに絞り込み</li>
               <li>教員が確認する観点を設定・共有</li>
-              <li>教員が確認・声かけに使う振り返り材料を整理</li>
+              <li>次回授業や学生本人への確認に使う振り返り材料を整理</li>
             </ul>
             <div className="manalio-teacher-triage" aria-label="教員確認の扱い分け">
               {teacherTriageItems.map((item) => (
@@ -511,7 +517,7 @@ export default function Home() {
           <p className="manalio-kicker">導入イメージ</p>
           <h2>まずは、実習準備授業から小さく始める。</h2>
           <p>
-            Manalioは、全学生へ一斉公開する前に、実習科目単位で安全性と教育効果を確認する導入を想定しています。
+            Manalioは、全学生へ一斉公開する前に、実習科目単位で使い方と支援上の課題を確認する導入を想定しています。
           </p>
         </div>
         <div className="manalio-case-grid">
@@ -532,7 +538,7 @@ export default function Home() {
         </div>
         <div className="manalio-faq-list">
           {faqItems.map((item) => (
-            <details key={item.question} open>
+            <details key={item.question}>
               <summary>{item.question}</summary>
               <p>{item.answer}</p>
             </details>
