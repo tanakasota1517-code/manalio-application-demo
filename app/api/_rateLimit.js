@@ -7,13 +7,22 @@ const MAX_BUCKETS = 5000;
 let requestsSincePrune = 0;
 
 export function enforceRateLimit(request, options = {}) {
+  return enforceRateLimitForIdentifier(getClientIdentifier(request), options);
+}
+
+export function enforceScopedRateLimit(identifier, options = {}) {
+  if (!identifier) return null;
+  return enforceRateLimitForIdentifier(normalizeClientIdentifier(identifier), options);
+}
+
+function enforceRateLimitForIdentifier(identifier, options = {}) {
   const namespace = options.namespace || "default";
   const limit = normalizePositiveInteger(options.limit, 60);
   const windowMs = normalizePositiveInteger(options.windowMs, 60_000);
   const now = Date.now();
   pruneExpiredBuckets(now);
 
-  const key = `${namespace}:${getClientIdentifier(request)}`;
+  const key = `${namespace}:${identifier}`;
   const current = buckets.get(key);
 
   if (!current || current.resetAt <= now) {
@@ -70,15 +79,21 @@ function pruneOverflowBuckets() {
 }
 
 function getClientIdentifier(request) {
-  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const rawIdentifier = (
-    forwardedFor ||
-    request.headers.get("x-real-ip") ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("fly-client-ip") ||
-    "local"
-  );
+  const rawIdentifier = getTrustedProxyIdentifier(request) || "local";
   return normalizeClientIdentifier(rawIdentifier);
+}
+
+function getTrustedProxyIdentifier(request) {
+  const provider = String(process.env.MANABI_TRUSTED_PROXY_PROVIDER || "").trim().toLowerCase();
+  if (provider === "vercel") return firstForwardedFor(request.headers.get("x-forwarded-for"));
+  if (provider === "cloudflare") return request.headers.get("cf-connecting-ip")?.trim() || "";
+  if (provider === "fly") return request.headers.get("fly-client-ip")?.trim() || "";
+  if (provider === "direct" && !isProductionLikeRuntime()) return request.headers.get("x-real-ip")?.trim() || "";
+  return "";
+}
+
+function firstForwardedFor(value) {
+  return String(value || "").split(",")[0]?.trim() || "";
 }
 
 function normalizeClientIdentifier(value) {
@@ -86,4 +101,19 @@ function normalizeClientIdentifier(value) {
   if (!normalized || normalized === "local") return "local";
   const bounded = normalized.slice(0, 512);
   return createHash("sha256").update(bounded).digest("hex").slice(0, 32);
+}
+
+function isProductionLikeRuntime() {
+  const vercelEnv = normalizeRuntimeEnv(process.env.VERCEL_ENV);
+  if (["production", "preview"].includes(vercelEnv)) return true;
+
+  const explicitRuntime = normalizeRuntimeEnv(process.env.MANABI_RUNTIME_ENV);
+  if (["production", "prod", "preview", "staging"].includes(explicitRuntime)) return true;
+  if (["development", "dev", "local", "test"].includes(explicitRuntime)) return false;
+
+  return normalizeRuntimeEnv(process.env.NODE_ENV) === "production";
+}
+
+function normalizeRuntimeEnv(value) {
+  return String(value || "").trim().toLowerCase();
 }

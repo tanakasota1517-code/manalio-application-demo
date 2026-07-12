@@ -1,6 +1,6 @@
 import { createHmac, createHash } from "node:crypto";
 
-export const BEDROCK_GUARDRAIL_PRICING_USD_PER_1000_UNITS = {
+const BEDROCK_GUARDRAIL_PRICING_USD_PER_1000_UNITS = {
   contentPolicyUnits: 0.15,
   topicPolicyUnits: 0.15,
   sensitiveInformationPolicyUnits: 0.10,
@@ -35,7 +35,7 @@ export function validateBedrockGuardrailConfig(config = getBedrockGuardrailConfi
   return missing;
 }
 
-export function estimateBedrockTextUnits(text) {
+function estimateBedrockTextUnits(text) {
   const length = String(text || "").length;
   if (length === 0) return 0;
   return Math.ceil(length / 1000);
@@ -66,7 +66,7 @@ export function estimateBedrockGuardrailCost(text, enabledPolicies = { sensitive
   };
 }
 
-export function calculateBedrockGuardrailCostFromUsage(usage = {}) {
+function calculateBedrockGuardrailCostFromUsage(usage = {}) {
   const breakdown = {};
   let totalUsd = 0;
 
@@ -85,7 +85,7 @@ export function calculateBedrockGuardrailCostFromUsage(usage = {}) {
   return { breakdown, totalUsd };
 }
 
-export function buildBedrockGuardrailRequest(text, { source = DEFAULT_SOURCE, outputScope = DEFAULT_OUTPUT_SCOPE } = {}) {
+function buildBedrockGuardrailRequest(text, { source = DEFAULT_SOURCE, outputScope = DEFAULT_OUTPUT_SCOPE } = {}) {
   return {
     source,
     outputScope,
