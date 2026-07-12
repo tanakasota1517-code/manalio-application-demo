@@ -2,9 +2,12 @@ import { getServerSessionContext, isRestConfigured, shouldFailClosedWhenRestMiss
 import { enforceRateLimit } from "../_rateLimit.js";
 import { enforceSameOriginRequest } from "../_requestSecurity.js";
 import { readLimitedJsonBody } from "../_jsonRequest.js";
+import { logSafeApiError, logSafeApiWarning } from "../_safeErrorLog.js";
+import { getPublicErrorDetails, registerPublicError } from "../_publicError.js";
 import {
   sanitizeClientResultForLog,
   sanitizeFeedbackForLog,
+  sanitizeLogSessionForLog,
   sanitizeResultMetaForLog,
 } from "../_privacy.js";
 
@@ -135,16 +138,17 @@ export async function POST(request) {
       id: result.id || row.id || null,
     });
   } catch (error) {
+    const publicError = getPublicErrorDetails(error);
     if (!isExpectedClientLogError(error)) {
-      console.error("Log persistence failed:", error.details || error.message);
+      logSafeApiError(error, "log_persistence_failed");
     }
     return Response.json(
       {
         persisted: false,
-        code: error.code || "log_persistence_failed",
-        error: error.publicMessage || "ログ保存に失敗しました。画面上のローカル保存は継続されています。",
+        code: publicError?.code || "log_persistence_failed",
+        error: publicError?.publicMessage || "ログ保存に失敗しました。画面上のローカル保存は継続されています。",
       },
-      { status: error.status || 500 },
+      { status: publicError?.status || 500 },
     );
   }
 }
@@ -154,23 +158,12 @@ function isPublicDemoOnly() {
 }
 
 function isExpectedClientLogError(error) {
-  return error instanceof LogError && error.status >= 400 && error.status < 500;
+  const details = getPublicErrorDetails(error);
+  return details !== null && details.status >= 400 && details.status < 500;
 }
 
 function buildLogSession(session = {}) {
-  return {
-    source: session.source || "supabase",
-    userId: session.userId || "",
-    name: session.name || "利用者",
-    role: session.role || "student",
-    roleLabel: session.roleLabel || "",
-    schoolId: session.schoolId || "",
-    classId: session.classId || "",
-    schoolName: session.schoolName || "",
-    schoolPlan: session.schoolPlan || "",
-    contractStatus: session.contractStatus || "",
-    className: session.className || "",
-  };
+  return sanitizeLogSessionForLog(session);
 }
 
 async function readLimitedJson(request, maxBytes) {
@@ -204,7 +197,7 @@ async function resolveFeedbackGenerationId(context, record) {
     "limit=1",
   ].join("&");
   const rows = await supabaseRestFetch(query).catch((error) => {
-    console.warn("Feedback generation link check skipped:", error.details || error.message);
+    logSafeApiWarning(error, "feedback_generation_link_check_failed");
     return [];
   });
   return rows?.[0]?.id || null;
@@ -272,23 +265,27 @@ function removeUndefined(row) {
 }
 
 async function insertSupabaseRow(table, row) {
-  const rows = await supabaseRestFetch(`/${table}`, {
-    method: "POST",
-    prefer: "return=representation",
-    body: row,
-  }).catch((error) => {
-    throw new LogError("supabase_insert_failed", "ログ保存に失敗しました。少し時間を置いて再試行してください。", 502, error.details || error.message);
-  });
+  let rows;
+  try {
+    rows = await supabaseRestFetch(`/${table}`, {
+      method: "POST",
+      prefer: "return=representation",
+      body: row,
+    });
+  } catch {
+    throw new LogError("supabase_insert_failed", "ログ保存に失敗しました。少し時間を置いて再試行してください。", 502);
+  }
   return rows?.[0] || {};
 }
 
 class LogError extends Error {
-  constructor(code, publicMessage, status = 500, details = "") {
+  constructor(code, publicMessage, status = 500) {
     super(publicMessage);
+    const safeStatus = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
     this.name = "LogError";
     this.code = code;
     this.publicMessage = publicMessage;
-    this.status = status;
-    this.details = details;
+    this.status = safeStatus;
+    registerPublicError(this, { code, publicMessage, status: safeStatus });
   }
 }
