@@ -264,8 +264,7 @@ async function handleSignUp(body, request) {
   });
 
   const sessionAuth = auth.session || auth;
-  const user = auth.user || auth.session?.user;
-  if (!isValidAuthUser(user)) throw createAuthTemporarilyUnavailableError();
+  const user = resolveSignUpUser(auth);
   await ensureProfile(user, userMetadata);
 
   if (!auth.session && !auth.access_token) {
@@ -479,6 +478,16 @@ async function resolveAuthUser(auth) {
   return getAuthUser(auth.access_token);
 }
 
+function resolveSignUpUser(auth) {
+  const wrappedUser = auth.user ?? auth.session?.user;
+  if (wrappedUser !== undefined && wrappedUser !== null) {
+    if (!isValidAuthUser(wrappedUser)) throw createAuthTemporarilyUnavailableError();
+    return wrappedUser;
+  }
+  if (!auth.session && !auth.access_token && isValidAuthUser(auth)) return auth;
+  throw createAuthTemporarilyUnavailableError();
+}
+
 async function refreshAuthSession(refreshToken) {
   const auth = await supabaseAuthFetch("/token?grant_type=refresh_token", {
     method: "POST",
@@ -506,7 +515,7 @@ async function supabaseAuthFetch(path, options = {}) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw mapSupabaseError(data, response.status);
+    throw mapSupabaseError(data, response.status, path);
   }
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     throw createAuthTemporarilyUnavailableError();
@@ -545,13 +554,18 @@ async function supabaseRestFetch(path, options = {}) {
   return data;
 }
 
-function mapSupabaseError(data, status) {
+function mapSupabaseError(data, status, path = "") {
   if (status >= 500) return createAuthTemporarilyUnavailableError();
   const source = data && typeof data === "object" && !Array.isArray(data) ? data : {};
   const message = String(source.msg || source.message || source.error_description || source.error || "");
   const lowered = message.toLowerCase();
+  const providerCode = String(source.code || source.error_code || "").trim().toLowerCase();
 
-  if (status === 400 && lowered.includes("invalid login")) {
+  if (
+    [400, 401].includes(status)
+    && path.includes("grant_type=password")
+    && (providerCode === "invalid_credentials" || lowered.includes("invalid login"))
+  ) {
     return new AuthError("invalid_login", "メールアドレスまたはパスワードが違います。", 401);
   }
   if (status === 422 && lowered.includes("already")) {
@@ -560,13 +574,24 @@ function mapSupabaseError(data, status) {
   if (status === 429) {
     return new AuthError("auth_rate_limit", "ログイン試行が多すぎます。少し時間を置いてください。", 429);
   }
-  if (status === 400 && lowered.includes("refresh token")) {
+  if ([400, 401].includes(status) && isConfirmedSessionExpiry(providerCode, lowered, path)) {
     return new AuthError("session_expired", "ログインの有効期限が切れました。もう一度ログインしてください。", 401);
   }
-  if (status === 401) {
-    return new AuthError("session_expired", "ログインの有効期限が切れました。もう一度ログインしてください。", 401);
-  }
+  if (status === 401) return createAuthTemporarilyUnavailableError();
   return new AuthError("auth_failed", "学校アカウント認証でエラーが発生しました。", 500);
+}
+
+function isConfirmedSessionExpiry(providerCode, message, path) {
+  const isUserLookup = path === "/user";
+  const isRefresh = path.includes("grant_type=refresh_token");
+  if (!isUserLookup && !isRefresh) return false;
+
+  if (providerCode === "bad_jwt" || providerCode === "user_not_found") return true;
+  if (isRefresh && ["refresh_token_not_found", "refresh_token_already_used"].includes(providerCode)) return true;
+  if (isUserLookup && ["invalid token", "jwt expired", "token has expired"].some((term) => message.includes(term))) return true;
+  return isRefresh
+    && message.includes("refresh token")
+    && ["invalid", "not found", "already used", "expired"].some((term) => message.includes(term));
 }
 
 function assertAuthTokenResponse(auth) {
