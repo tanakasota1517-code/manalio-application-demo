@@ -1,6 +1,8 @@
 import { enforceRateLimit } from "../../_rateLimit.js";
 import { readLimitedJsonBody } from "../../_jsonRequest.js";
+import { getPublicErrorDetails } from "../../_publicError.js";
 import { enforceSameOriginRequest } from "../../_requestSecurity.js";
+import { logSafeApiError } from "../../_safeErrorLog.js";
 import {
   getServerSessionContext,
   isRestConfigured,
@@ -88,12 +90,16 @@ export async function POST(request) {
   try {
     body = await readLimitedJsonBody(request, MAX_BODY_BYTES, { requireJsonContentType: true });
   } catch (error) {
+    const publicError = getPublicErrorDetails(error);
+    if (!publicError) {
+      logSafeApiError(error, "access_tracking_failed");
+    }
     return jsonNoStore(
       {
-        code: error.code || "invalid_request",
-        error: error.publicMessage || "リクエスト形式が不正です。",
+        code: publicError?.code || "tracking_failed",
+        error: publicError?.publicMessage || "アクセス履歴のリクエストを処理できませんでした。",
       },
-      error.status || 400,
+      publicError?.status || 500,
     );
   }
 
@@ -147,7 +153,7 @@ export async function POST(request) {
 
     return jsonNoStore({ ok: true, tracked: true });
   } catch (error) {
-    console.error("Failed to track teacher preview access:", error.message);
+    logSafeApiError(error, "access_tracking_failed");
     return jsonNoStore(
       {
         code: "tracking_failed",
@@ -167,7 +173,8 @@ function isAccessLoggingEnabled() {
 }
 
 function normalizeEvent(value) {
-  const event = String(value || "").trim();
+  if (typeof value !== "string") return "";
+  const event = value.trim();
   return EVENT_TYPES.has(event) ? event : "";
 }
 
