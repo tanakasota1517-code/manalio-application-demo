@@ -60,9 +60,9 @@ export default function ProductPage() {
         <section className="detail-section detail-split">
           <div>
             <span className="site-kicker">学生画面</span>
-            <h2>学生には、作成ではなく「考え直し」の余白を残す。</h2>
+            <h2>学生には「考え直し」の余白を残す。</h2>
             <p>
-              AIの返答は完成文ではなく、学生が自分の言葉で書き直すための問いです。
+              AIの返答は、学生が自分の言葉で書き直すための問いです。
               学生メモにない事実は補完せず、確認すべき点として残します。
             </p>
           </div>
@@ -110,10 +110,10 @@ export default function ProductPage() {
         <section className="detail-section detail-split reverse">
           <div>
             <span className="site-kicker">運用負担</span>
-            <h2>実習期間中も、確認候補を対応先で分ける。</h2>
+            <h2>実習前後の確認候補を、支援先で分ける。</h2>
             <p>
               確認候補が多くなっても、同じ重さで扱う必要はありません。
-              個人情報や断定表現など当日確認したいもの、授業でまとめて扱うもの、学生本人へ返すものに分けて、確認量を抑えます。
+              個人情報や断定表現など学校教員が確認したいもの、授業でまとめて扱うもの、学生本人へ返すものに分けて、確認量を抑えます。
             </p>
           </div>
           <div className="detail-list">
