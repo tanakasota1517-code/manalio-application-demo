@@ -148,12 +148,13 @@ export async function PUT(request) {
   try {
     const body = await readLimitedJson(request, 20000);
     const template = normalizeSchoolFormat(getTemplateInput(body));
+    const submittedRow = toSchoolFormatRow(template, context);
     const rows = await supabaseRestFetch("/school_format_templates?on_conflict=school_id", {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=representation",
-      body: toSchoolFormatRow(template, context),
+      body: submittedRow,
     });
-    if (!isConfirmedSchoolFormatSave(rows, template, context)) {
+    if (!isConfirmedSchoolFormatSave(rows, template, submittedRow)) {
       throw new Error("school_format_save_response_invalid");
     }
 
@@ -180,13 +181,14 @@ export async function PUT(request) {
   }
 }
 
-function isConfirmedSchoolFormatSave(rows, template, context) {
+function isConfirmedSchoolFormatSave(rows, template, submittedRow) {
   if (!Array.isArray(rows) || rows.length !== 1) return false;
   const row = rows[0];
   if (
     !isStoredSchoolFormatRowValid(row)
-    || row.school_id !== context.session.schoolId
-    || row.updated_by !== context.user.id
+    || row.school_id !== submittedRow.school_id
+    || row.updated_by !== submittedRow.updated_by
+    || Date.parse(row.updated_at) !== Date.parse(submittedRow.updated_at)
   ) {
     return false;
   }
