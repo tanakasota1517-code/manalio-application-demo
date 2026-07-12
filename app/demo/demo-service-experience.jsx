@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 const sampleScenes = [
   {
     id: "blocks",
+    studentName: "学生A",
     title: "ブロック遊び",
     description: "試し直す姿を、結果ではなく過程として見る場面",
     goalReflection: "子どもが自分で試す姿を見ようとした。積んだものが崩れた後も、すぐにやめずに別の置き方を試していたところを観察できた。",
@@ -27,9 +28,11 @@ const sampleScenes = [
     question: "A児が試し直す前後で、周囲の環境や保育者の関わりはどう変わっていましたか。",
     nextFocus: "明日は、崩れた直後の表情、周囲の反応、保育者の声かけのタイミングを分けて見る。",
     teacherNote: "挑戦を続ける姿を、できた/できないではなく試行錯誤として記録できているか確認する。",
+    teacherCheckpoints: ["試し直した過程が書けているか", "友だちの関わりを結果ではなく変化として見ているか"],
   },
   {
     id: "meal",
+    studentName: "学生B",
     title: "食事場面",
     description: "子どもの気持ちを決めつけず、見た行動から考える場面",
     goalReflection: "食事場面で子どもの様子を観察する目標だった。食べた量だけでなく、皿の置き方や保育者の声かけへの反応を見る必要があると分かった。",
@@ -52,11 +55,13 @@ const sampleScenes = [
     question: "B児の反応は、野菜そのもの、量、保育者の声かけのどれと関係していそうですか。",
     nextFocus: "明日は、食べる/食べないの結果だけでなく、声かけ前後の表情と手の動きを見る。",
     teacherNote: "子どもの好き嫌いを断定せず、環境や関わり方に目を向けられているか確認する。",
+    teacherCheckpoints: ["食べた量だけで判断していないか", "声かけ前後の姿を根拠にしているか"],
   },
   {
     id: "conflict",
+    studentName: "学生C",
     title: "友だちとのやりとり",
-    description: "一方だけを評価せず、関係の変化を観察する場面",
+    description: "一方だけを決めつけず、関係の変化を観察する場面",
     goalReflection: "友だちとの関わりを見る目標だった。玩具をめぐるやりとりで、どちらが悪いかではなく、言葉や表情の変化を見る必要があると感じた。",
     episodes: [
       {
@@ -76,7 +81,8 @@ const sampleScenes = [
     draft: "トラブルとしてまとめるより、手を伸ばした、横にずらした、保育者が見守ったという行動の順番を残すと、関係の変化を考察しやすくなります。",
     question: "玩具をめぐるやりとりの中で、子ども同士が自分の思いを伝えようとした瞬間はありましたか。",
     nextFocus: "明日は、保育者が入る前に子ども同士が見せる表情、言葉、手の動きを見る。",
-    teacherNote: "トラブルを評価語でまとめず、子どもの関わり方の変化として扱えているか確認する。",
+    teacherNote: "トラブルと決めつけず、子どもの関わり方の変化として扱えているか確認する。",
+    teacherCheckpoints: ["どちらが悪いかの記録になっていないか", "保育者が待った意味を観察に戻せているか"],
   },
 ];
 
@@ -96,9 +102,9 @@ const safetyChecks = [
 ];
 
 const teacherRows = [
-  ["当日確認", "個別に早めに声をかけたい候補", "子どもの気持ちを断定していないか"],
-  ["授業共有", "クラス全体で扱いやすい傾向", "実習先の助言を翌日の観察へ戻せているか"],
-  ["学生本人", "提出前の自己確認として返せる項目", "結果ではなく過程を観察できているか"],
+  ["授業共有", "記録が結果だけになりやすい", "過程、環境、保育者の関わりに戻す"],
+  ["授業共有", "気持ちを断定しやすい", "見た行動と言える範囲を分ける"],
+  ["学生本人", "翌日に見る点が弱い", "次に見る場面を一つに絞る"],
 ];
 
 export function DemoServiceExperience() {
@@ -117,7 +123,7 @@ export function DemoServiceExperience() {
         <h2 id="service-demo-heading">学生画面と教員画面を切り替えて触る</h2>
         <p>
           下の画面は、Manalioの実際の利用場面に近い形で動くデモです。
-          場面を選ぶと、学校フォーマットの記入、安全な表現確認、AIの叩き台比較、教員側の確認候補が連動します。
+          場面を選ぶと、学校フォーマットの記入、安全な表現確認、整理案との比較、教員側の確認候補が連動します。
           架空データだけを使い、外部AI APIや学校データ保存は行いません。
         </p>
         <div className="detail-link-row demo-service-links">
@@ -133,10 +139,10 @@ export function DemoServiceExperience() {
             <strong>{mode === "student" ? "学生画面" : "教員画面"}</strong>
           </div>
           <div className="demo-role-switch" role="group" aria-label="表示する画面">
-            <button type="button" className={mode === "student" ? "active" : ""} onClick={() => setMode("student")}>
+            <button type="button" className={mode === "student" ? "active" : ""} aria-pressed={mode === "student"} onClick={() => setMode("student")}>
               学生
             </button>
-            <button type="button" className={mode === "teacher" ? "active" : ""} onClick={() => setMode("teacher")}>
+            <button type="button" className={mode === "teacher" ? "active" : ""} aria-pressed={mode === "teacher"} onClick={() => setMode("teacher")}>
               教員
             </button>
           </div>
@@ -148,6 +154,7 @@ export function DemoServiceExperience() {
               key={scene.id}
               type="button"
               className={scene.id === activeSceneId ? "active" : ""}
+              aria-pressed={scene.id === activeSceneId}
               onClick={() => {
                 setActiveSceneId(scene.id);
                 setShowReflection(true);
@@ -187,7 +194,7 @@ export function DemoServiceExperience() {
 
             <div className="demo-side-panel">
               <div className="demo-panel-head">
-                <span>叩き台と比較</span>
+                <span>整理案と比較</span>
                 <button type="button" onClick={() => setShowReflection((current) => !current)}>
                   {showReflection ? "比較を隠す" : "比較を見る"}
                 </button>
@@ -208,14 +215,14 @@ export function DemoServiceExperience() {
                     <p>{activeScene.overallLearning}</p>
                   </article>
                   <article>
-                    <span>AIの叩き台</span>
+                    <span>整理案</span>
                     <strong>{activeScene.draft}</strong>
                     <p>{activeScene.question}</p>
                   </article>
                   <div className="demo-question-panel">
                     <span>翌日の観察</span>
                     <strong>{activeScene.nextFocus}</strong>
-                    <p>叩き台は完成文ではありません。学生が元の記録と見比べ、自分の言葉で直すための材料です。</p>
+                    <p>学生が元の記録と見比べ、自分の言葉で整えるための材料です。</p>
                   </div>
                 </div>
               )}
@@ -223,19 +230,52 @@ export function DemoServiceExperience() {
           </div>
         ) : (
           <div className="demo-teacher-board" aria-label="教員画面デモ">
-            <div className="demo-teacher-summary">
-              <span>確認候補</span>
-              <strong>{activeScene.title}</strong>
-              <p>{activeScene.teacherNote}</p>
-            </div>
-            <div className="demo-teacher-table">
-              {teacherRows.map(([label, title, body]) => (
-                <article key={label}>
-                  <span>{label}</span>
-                  <strong>{title}</strong>
-                  <p>{body}</p>
-                </article>
+            <div className="demo-teacher-students" aria-label="学生一覧">
+              {sampleScenes.map((scene) => (
+                <button
+                  key={scene.id}
+                  type="button"
+                  className={scene.id === activeSceneId ? "active" : ""}
+                  aria-pressed={scene.id === activeSceneId}
+                  onClick={() => setActiveSceneId(scene.id)}
+                >
+                  <strong>{scene.studentName}</strong>
+                  <span>{scene.title}</span>
+                  <small>{scene.nextFocus}</small>
+                </button>
               ))}
+            </div>
+            <div className="demo-teacher-detail">
+              <div className="demo-teacher-summary">
+                <span>個人チェックポイント</span>
+                <strong>{activeScene.studentName} / {activeScene.title}</strong>
+                <p>{activeScene.teacherNote}</p>
+              </div>
+              <div className="demo-teacher-process">
+                {["記録", "安全確認", "問い返し", "実習後確認"].map((step, index) => (
+                  <article key={step}>
+                    <span>{step}</span>
+                    <strong>{index === 0 ? "入力済み" : index === 1 ? "確認済み" : index === 2 ? "問いあり" : "確認材料"}</strong>
+                  </article>
+                ))}
+              </div>
+              <div className="demo-teacher-checkpoints">
+                {activeScene.teacherCheckpoints.map((item) => (
+                  <article key={item}>
+                    <span>確認</span>
+                    <p>{item}</p>
+                  </article>
+                ))}
+              </div>
+              <div className="demo-teacher-table">
+                {teacherRows.map(([label, title, body]) => (
+                  <article key={`${label}-${title}`}>
+                    <span>{label}</span>
+                    <strong>{title}</strong>
+                    <p>{body}</p>
+                  </article>
+                ))}
+              </div>
             </div>
           </div>
         )}
