@@ -188,7 +188,7 @@ function isConfirmedSchoolFormatSave(rows, template, submittedRow) {
     !isStoredSchoolFormatRowValid(row)
     || row.school_id !== submittedRow.school_id
     || row.updated_by !== submittedRow.updated_by
-    || Date.parse(row.updated_at) !== Date.parse(submittedRow.updated_at)
+    || Date.parse(row.updated_at) < Date.parse(submittedRow.updated_at)
   ) {
     return false;
   }
