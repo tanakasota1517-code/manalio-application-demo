@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import {
+  buildDemoTeacherProcessContext,
+  createDemoProcessContextId,
+  createDemoStudentId,
+  parseStudentProcessSwitchMarker,
+  shouldPreserveStudentProcessEventsForDemoSwitch as shouldPreserveStudentProcessEvents,
+  STUDENT_PROCESS_EVENT_STORAGE_KEY,
+  STUDENT_PROCESS_SWITCH_STORAGE_KEY,
+} from "../student-process-events.mjs";
 
 const demoProfiles = {
   teacher: {
@@ -18,18 +27,24 @@ const demoProfiles = {
   },
 };
 
+const STUDENT_PROCESS_EVENT_KEY = STUDENT_PROCESS_EVENT_STORAGE_KEY;
+const STUDENT_PROCESS_SWITCH_KEY = STUDENT_PROCESS_SWITCH_STORAGE_KEY;
+
 const APP_LOCAL_STORAGE_KEYS = [
   "manabi-session",
   "manabi-demo-session",
   "manabi-diary-feedback",
   "manabi-generation-logs",
+  STUDENT_PROCESS_EVENT_KEY,
+  STUDENT_PROCESS_SWITCH_KEY,
   "manabi-practice-pass-demo",
 ];
 const SHOW_DEMO_SHORTCUTS = process.env.NEXT_PUBLIC_MANABI_SHOW_DEMO_SHORTCUTS === "true";
 
-function clearAppLocalStorage() {
+function clearAppLocalStorage({ preserveStudentProcessEvents = false } = {}) {
   try {
     for (const key of APP_LOCAL_STORAGE_KEYS) {
+      if (preserveStudentProcessEvents && key === STUDENT_PROCESS_EVENT_KEY) continue;
       localStorage.removeItem(key);
     }
     for (const key of Object.keys(localStorage)) {
@@ -40,6 +55,21 @@ function clearAppLocalStorage() {
   } catch {
     // localStorage may be unavailable in hardened browser settings.
   }
+}
+
+function getPendingStudentProcessSwitch() {
+  try {
+    return parseStudentProcessSwitchMarker(localStorage.getItem(STUDENT_PROCESS_SWITCH_KEY));
+  } catch {
+    return null;
+  }
+}
+
+function shouldPreserveStudentProcessEventsForDemoSwitch(nextSession) {
+  return shouldPreserveStudentProcessEvents({
+    pendingSwitch: getPendingStudentProcessSwitch(),
+    nextSession,
+  });
 }
 
 function safeSetLocalStorage(key, value) {
@@ -59,6 +89,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState("signIn");
   const [schoolName, setSchoolName] = useState("さくら保育者養成校");
   const [className, setClassName] = useState("保育実習I / 2年A組");
+  const [demoContextExplicitlySet, setDemoContextExplicitlySet] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -102,18 +133,32 @@ export default function LoginPage() {
   }, [router]);
 
   function saveDemoSession(session) {
-    clearAppLocalStorage();
+    clearAppLocalStorage({
+      preserveStudentProcessEvents: shouldPreserveStudentProcessEventsForDemoSwitch(session),
+    });
     return safeSetLocalStorage("manabi-demo-session", JSON.stringify(session));
   }
 
   function loginAs(selectedRole = role) {
+    if (!demoLoginAllowed) {
+      setStatus("デモログインは現在の環境では利用できません。学校アカウントでログインしてください。");
+      return;
+    }
     const profile = demoProfiles[selectedRole];
+    const pendingSwitch = getPendingStudentProcessSwitch();
     const session = {
       source: "demo",
       ...profile,
       email: email || profile.email,
+      demoStudentId: selectedRole === "student" ? createDemoStudentId() : "",
       schoolName,
       className,
+      ...(selectedRole === "student"
+        ? { studentProcessContextKey: createDemoProcessContextId() }
+        : buildDemoTeacherProcessContext({
+            pendingSwitch,
+            usePendingContext: !demoContextExplicitlySet,
+          })),
       signedInAt: new Date().toISOString(),
     };
     if (!saveDemoSession(session)) {
@@ -213,11 +258,17 @@ export default function LoginPage() {
             <>
               <label>
                 学校名
-                <input value={schoolName} autoComplete="organization" onChange={(event) => setSchoolName(event.target.value)} />
+                <input value={schoolName} autoComplete="organization" onChange={(event) => {
+                  setSchoolName(event.target.value);
+                  setDemoContextExplicitlySet(true);
+                }} />
               </label>
               <label>
                 クラス・実習科目
-                <input value={className} onChange={(event) => setClassName(event.target.value)} />
+                <input value={className} onChange={(event) => {
+                  setClassName(event.target.value);
+                  setDemoContextExplicitlySet(true);
+                }} />
               </label>
               <label>
                 表示名
@@ -247,7 +298,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {SHOW_DEMO_SHORTCUTS && (
+        {demoLoginAllowed && (
           <div className="login-actions">
             <button className="secondary-button login-link" type="button" onClick={() => loginAs("teacher")}>教員として確認</button>
             <button className="secondary-button login-link" type="button" onClick={() => loginAs("student")}>学生として確認</button>
