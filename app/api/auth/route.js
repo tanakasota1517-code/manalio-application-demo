@@ -586,8 +586,24 @@ function isConfirmedSessionExpiry(providerCode, message, path) {
   const isRefresh = path.includes("grant_type=refresh_token");
   if (!isUserLookup && !isRefresh) return false;
 
-  if (providerCode === "bad_jwt" || providerCode === "user_not_found") return true;
-  if (isRefresh && ["refresh_token_not_found", "refresh_token_already_used"].includes(providerCode)) return true;
+  if (
+    isUserLookup
+    && ["bad_jwt", "session_expired", "session_not_found", "user_not_found"].includes(providerCode)
+  ) {
+    return true;
+  }
+  if (
+    isRefresh
+    && [
+      "refresh_token_not_found",
+      "refresh_token_already_used",
+      "session_expired",
+      "session_not_found",
+      "user_not_found",
+    ].includes(providerCode)
+  ) {
+    return true;
+  }
   if (isUserLookup && ["invalid token", "jwt expired", "token has expired"].some((term) => message.includes(term))) return true;
   return isRefresh
     && message.includes("refresh token")
