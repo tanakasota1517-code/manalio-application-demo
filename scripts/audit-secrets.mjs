@@ -1,24 +1,12 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { extname, join, relative } from "node:path";
 
 const ROOT = process.cwd();
-const SKIP_DIRS = new Set([".git", ".next", "node_modules", "out"]);
+const SKIP_DIRS = new Set([".git", ".next", "node_modules", "out", "dist", "build", ".vercel"]);
 const SKIP_FILES = new Set([".env", ".env.local"]);
-const TEXT_EXTENSIONS = new Set([
-  "",
-  ".css",
-  ".env.example",
-  ".example",
-  ".html",
-  ".js",
-  ".json",
-  ".jsx",
-  ".md",
-  ".mjs",
-  ".sql",
-  ".svg",
-  ".txt",
-]);
+const MAX_SCAN_BYTES = 1024 * 1024;
+const SENSITIVE_FILE_EXTENSIONS = new Set([".pem", ".key", ".p8", ".p12", ".pfx"]);
+const SENSITIVE_FILE_NAMES = new Set(["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", ".env.production", ".env.preview", ".env.staging"]);
 
 const SECRET_PATTERNS = [
   {
@@ -37,18 +25,38 @@ const SECRET_PATTERNS = [
     label: "Slack token",
     pattern: /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/g,
   },
+  {
+    label: "GitHub token",
+    pattern: /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{50,}\b/g,
+  },
+  {
+    label: "AWS access key",
+    pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
+  },
+  {
+    label: "Google API key",
+    pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g,
+  },
+  {
+    label: "Vercel token",
+    pattern: /\bvercel_[A-Za-z0-9]{20,}\b/g,
+  },
+  {
+    label: "Supabase service role assignment",
+    pattern: /\bSUPABASE_SERVICE_ROLE_KEY\s*=\s*["']?eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g,
+  },
 ];
-
-function extensionOf(file) {
-  if (file.endsWith(".env.example") || file.endsWith(".local.example")) return ".env.example";
-  const dot = file.lastIndexOf(".");
-  return dot === -1 ? "" : file.slice(dot);
-}
 
 function shouldScan(file) {
   const name = file.split("/").pop();
   if (SKIP_FILES.has(name)) return false;
-  return TEXT_EXTENSIONS.has(extensionOf(file));
+  return true;
+}
+
+function isSensitiveFileName(file) {
+  const name = file.split("/").pop();
+  if (name.endsWith(".example") || name.endsWith(".sample") || name.includes(".example.")) return false;
+  return SENSITIVE_FILE_NAMES.has(name) || SENSITIVE_FILE_EXTENSIONS.has(extname(name));
 }
 
 function walk(dir) {
@@ -64,7 +72,7 @@ function walk(dir) {
 
     if (entry.isFile() && shouldScan(path)) {
       const size = statSync(path).size;
-      if (size <= 1024 * 1024) files.push(path);
+      if (size <= MAX_SCAN_BYTES) files.push(path);
     }
   }
 
@@ -83,8 +91,20 @@ function lineNumberFor(text, index) {
 const findings = [];
 
 for (const file of walk(ROOT)) {
-  const text = readFileSync(file, "utf8");
   const displayPath = relative(ROOT, file) || file;
+  if (isSensitiveFileName(displayPath)) {
+    findings.push({
+      file: displayPath,
+      label: "Sensitive filename",
+      line: 1,
+      value: "[content not displayed]",
+    });
+    continue;
+  }
+
+  const buffer = readFileSync(file);
+  if (buffer.includes(0)) continue;
+  const text = buffer.toString("utf8");
 
   for (const { label, pattern } of SECRET_PATTERNS) {
     pattern.lastIndex = 0;
